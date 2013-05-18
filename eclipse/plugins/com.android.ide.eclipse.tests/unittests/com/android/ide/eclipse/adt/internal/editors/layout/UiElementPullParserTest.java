@@ -16,15 +16,15 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo.Format;
+import com.android.SdkConstants;
+import com.android.ide.common.api.IAttributeInfo.Format;
+import com.android.ide.common.resources.platform.AttributeInfo;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.mock.MockXmlNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
-import com.android.ide.eclipse.adt.internal.resources.AttributeInfo;
-import com.android.sdklib.SdkConstants;
-import com.android.sdklib.resources.Density;
+import com.android.resources.Density;
 
 import org.w3c.dom.Node;
 import org.xmlpull.v1.XmlPullParser;
@@ -44,10 +44,8 @@ public class UiElementPullParserTest extends TestCase {
     private TextAttributeDescriptor createTextAttrDesc(String xmlName) {
         return new TextAttributeDescriptor(
                 xmlName,    // xmlLocalName
-                xmlName,    // uiName
-                SdkConstants.NS_RESOURCES, // ns uri
-                "",         // tooltip
-                new AttributeInfo(xmlName, new Format[] { Format.STRING })
+                SdkConstants.NS_RESOURCES,
+                new AttributeInfo(xmlName, Format.STRING_SET)
                 );
     }
 
@@ -170,8 +168,8 @@ public class UiElementPullParserTest extends TestCase {
             UiElementPullParser parser = new UiElementPullParser(
                     ui, // model
                     false, // explodedView
-                    Density.MEDIUM.getDpiValue(), // density (default from ConfigurationComposite)
-                    Density.MEDIUM.getDpiValue(), // xdpi (default from ConfigurationComposite)
+                    null, // explodeNodes
+                    Density.MEDIUM, // density (default from ConfigurationComposite)
                     null // iProject
                     );
 

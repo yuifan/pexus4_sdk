@@ -16,8 +16,12 @@
 
 package com.android.ide.eclipse.adt.internal.launch.junit;
 
+import com.android.SdkConstants;
+import com.android.ddmlib.testrunner.IRemoteAndroidTestRunner.TestSize;
+import com.android.ide.common.xml.ManifestData;
+import com.android.ide.common.xml.ManifestData.Instrumentation;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
 import com.android.ide.eclipse.adt.internal.launch.AndroidLaunch;
 import com.android.ide.eclipse.adt.internal.launch.AndroidLaunchConfiguration;
 import com.android.ide.eclipse.adt.internal.launch.AndroidLaunchController;
@@ -26,14 +30,14 @@ import com.android.ide.eclipse.adt.internal.launch.LaunchConfigDelegate;
 import com.android.ide.eclipse.adt.internal.launch.LaunchMessages;
 import com.android.ide.eclipse.adt.internal.launch.junit.runtime.AndroidJUnitLaunchInfo;
 import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
-import com.android.sdklib.SdkConstants;
-import com.android.sdklib.xml.ManifestData;
-import com.android.sdklib.xml.ManifestData.Instrumentation;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.jdt.core.IJavaElement;
@@ -41,6 +45,7 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.internal.junit.launcher.JUnitLaunchConfigurationConstants;
 import org.eclipse.jdt.internal.junit.launcher.TestKindRegistry;
 import org.eclipse.jdt.launching.IJavaLaunchConfigurationConstants;
+import org.eclipse.swt.widgets.Display;
 
 /**
  * Run configuration that can execute JUnit tests on an Android platform.
@@ -55,13 +60,17 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
     /** Launch config attribute that stores instrumentation runner. */
     static final String ATTR_INSTR_NAME = AdtPlugin.PLUGIN_ID + ".instrumentation"; //$NON-NLS-1$
 
+    /** Launch config attribute that stores the test size annotation to run. */
+    static final String ATTR_TEST_SIZE = AdtPlugin.PLUGIN_ID + ".testSize"; //$NON-NLS-1$
+
     private static final String EMPTY_STRING = ""; //$NON-NLS-1$
 
     @Override
     protected void doLaunch(final ILaunchConfiguration configuration, final String mode,
-            IProgressMonitor monitor, IProject project, final AndroidLaunch androidLaunch,
-            AndroidLaunchConfiguration config, AndroidLaunchController controller,
-            IFile applicationPackage, ManifestData manifestData) {
+            final IProgressMonitor monitor, final IProject project,
+            final AndroidLaunch androidLaunch, final AndroidLaunchConfiguration config,
+            final AndroidLaunchController controller, final IFile applicationPackage,
+            final ManifestData manifestData) {
 
         String runner = getRunner(project, configuration, manifestData);
         if (runner == null) {
@@ -72,7 +81,7 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
             return;
         }
         // get the target app's package
-        String targetAppPackage = getTargetPackage(manifestData, runner);
+        final String targetAppPackage = getTargetPackage(manifestData, runner);
         if (targetAppPackage == null) {
             AdtPlugin.displayError(LaunchMessages.LaunchDialogTitle,
                     String.format(LaunchMessages.AndroidJUnitDelegate_NoTargetMsg_3s,
@@ -80,18 +89,35 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
             androidLaunch.stopLaunch();
             return;
         }
-        String testAppPackage = manifestData.getPackage();
+        final String testAppPackage = manifestData.getPackage();
         AndroidJUnitLaunchInfo junitLaunchInfo = new AndroidJUnitLaunchInfo(project,
                 testAppPackage, runner);
         junitLaunchInfo.setTestClass(getTestClass(configuration));
         junitLaunchInfo.setTestPackage(getTestPackage(configuration));
         junitLaunchInfo.setTestMethod(getTestMethod(configuration));
         junitLaunchInfo.setLaunch(androidLaunch);
-        IAndroidLaunchAction junitLaunch = new AndroidJUnitLaunchAction(junitLaunchInfo);
+        junitLaunchInfo.setTestSize(getTestSize(configuration));
+        final IAndroidLaunchAction junitLaunch = new AndroidJUnitLaunchAction(junitLaunchInfo);
 
-        controller.launch(project, mode, applicationPackage, testAppPackage, targetAppPackage,
-                manifestData.getDebuggable(), manifestData.getMinSdkVersionString(),
-                junitLaunch, config, androidLaunch, monitor);
+        // launch on a separate thread if currently on the display thread
+        if (Display.getCurrent() != null) {
+            Job job = new Job("Junit Launch") {     //$NON-NLS-1$
+                @Override
+                protected IStatus run(IProgressMonitor m) {
+                    controller.launch(project, mode, applicationPackage, testAppPackage,
+                            targetAppPackage, manifestData.getDebuggable(),
+                            manifestData.getMinSdkVersionString(),
+                            junitLaunch, config, androidLaunch, monitor);
+                    return Status.OK_STATUS;
+                }
+            };
+            job.setPriority(Job.INTERACTIVE);
+            job.schedule();
+        } else {
+            controller.launch(project, mode, applicationPackage, testAppPackage, targetAppPackage,
+                    manifestData.getDebuggable(), manifestData.getMinSdkVersionString(),
+                    junitLaunch, config, androidLaunch, monitor);
+        }
     }
 
     /**
@@ -155,6 +181,29 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
     }
 
     /**
+     * Returns the test sizes to run as saved in the launch configuration.
+     * @return {@link TestSize} if only tests of specific sizes should be run,
+     *         null if all tests should be run
+     */
+    private TestSize getTestSize(ILaunchConfiguration configuration) {
+        String testSizeAnnotation = getStringLaunchAttribute(
+                AndroidJUnitLaunchConfigDelegate.ATTR_TEST_SIZE,
+                configuration);
+        if (AndroidJUnitLaunchConfigurationTab.SMALL_TEST_ANNOTATION.equals(
+                    testSizeAnnotation)){
+            return TestSize.SMALL;
+        } else if (AndroidJUnitLaunchConfigurationTab.MEDIUM_TEST_ANNOTATION.equals(
+                    testSizeAnnotation)) {
+            return TestSize.MEDIUM;
+        } else if (AndroidJUnitLaunchConfigurationTab.LARGE_TEST_ANNOTATION.equals(
+                    testSizeAnnotation)) {
+            return TestSize.LARGE;
+        } else {
+            return null;
+        }
+    }
+
+    /**
      * Gets a instrumentation runner for the launch.
      * <p/>
      * If a runner is stored in the given <code>configuration</code>, will return that.
@@ -188,7 +237,7 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
                     LaunchMessages.AndroidJUnitDelegate_NoRunnerConsoleMsg_4s,
                     project.getName(),
                     SdkConstants.CLASS_INSTRUMENTATION_RUNNER,
-                    AndroidConstants.LIBRARY_TEST_RUNNER,
+                    AdtConstants.LIBRARY_TEST_RUNNER,
                     SdkConstants.FN_ANDROID_MANIFEST_XML));
             return null;
         } catch (CoreException e) {
@@ -198,7 +247,7 @@ public class AndroidJUnitLaunchConfigDelegate extends LaunchConfigDelegate {
         return null;
     }
 
-    private String getRunnerFromConfig(ILaunchConfiguration configuration) throws CoreException {
+    private String getRunnerFromConfig(ILaunchConfiguration configuration) {
         return getStringLaunchAttribute(ATTR_INSTR_NAME, configuration);
     }
 

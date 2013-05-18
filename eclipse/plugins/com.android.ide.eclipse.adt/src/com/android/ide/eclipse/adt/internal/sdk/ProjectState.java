@@ -16,9 +16,11 @@
 
 package com.android.ide.eclipse.adt.internal.sdk;
 
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.ide.eclipse.adt.AdtPlugin;
+import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.internal.project.ApkSettings;
 import com.android.sdklib.internal.project.ProjectProperties;
 import com.android.sdklib.internal.project.ProjectPropertiesWorkingCopy;
 
@@ -29,14 +31,17 @@ import org.eclipse.core.runtime.Status;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 
 /**
  * Centralized state for Android Eclipse project.
- * <p>This gives raw access to the properties (from <code>default.properties</code>), as well
- * as direct access to target, apksettings and library information.
+ * <p>This gives raw access to the properties (from <code>project.properties</code>), as well
+ * as direct access to target and library information.
  *
  * This also gives access to library information.
  *
@@ -106,7 +111,7 @@ public final class ProjectState {
 
         /**
          * Returns the relative path of the library from the main project.
-         * <p/>This is identical to the value defined in the main project's default.properties.
+         * <p/>This is identical to the value defined in the main project's project.properties.
          */
         public String getRelativePath() {
             return mRelativePath;
@@ -149,14 +154,15 @@ public final class ProjectState {
 
         @Override
         public int hashCode() {
-            return mRelativePath.hashCode();
+            return normalizePath(mRelativePath).hashCode();
         }
     }
 
     private final IProject mProject;
     private final ProjectProperties mProperties;
     private IAndroidTarget mTarget;
-    private ApkSettings mApkSettings;
+    private BuildToolInfo mBuildToolInfo;
+
     /**
      * list of libraries. Access to this list must be protected by
      * <code>synchronized(mLibraries)</code>, but it is important that such code do not call
@@ -165,7 +171,7 @@ public final class ProjectState {
     private final ArrayList<LibraryState> mLibraries = new ArrayList<LibraryState>();
     /** Cached list of all IProject instances representing the resolved libraries, including
      * indirect dependencies. This must never be null. */
-    private IProject[] mLibraryProjects = new IProject[0];
+    private List<IProject> mLibraryProjects = Collections.emptyList();
     /**
      * List of parent projects. When this instance is a library ({@link #isLibrary()} returns
      * <code>true</code>) then this is filled with projects that depends on this project.
@@ -179,9 +185,6 @@ public final class ProjectState {
 
         mProject = project;
         mProperties = properties;
-
-        // load the ApkSettings
-        mApkSettings = new ApkSettings(properties);
 
         // load the libraries
         synchronized (mLibraries) {
@@ -207,6 +210,14 @@ public final class ProjectState {
         return mProperties;
     }
 
+    public @Nullable String getProperty(@NonNull String name) {
+        if (mProperties != null) {
+            return mProperties.getProperty(name);
+        }
+
+        return null;
+    }
+
     public void setTarget(IAndroidTarget target) {
         mTarget = target;
     }
@@ -229,6 +240,23 @@ public final class ProjectState {
 
     public IAndroidTarget getTarget() {
         return mTarget;
+    }
+
+    public void setBuildToolInfo(BuildToolInfo buildToolInfo) {
+        mBuildToolInfo = buildToolInfo;
+    }
+
+    public BuildToolInfo getBuildToolInfo() {
+        return mBuildToolInfo;
+    }
+
+    /**
+     * Returns the build tools version from the project's properties.
+     * @return the value or null
+     */
+    @Nullable
+    public String getBuildToolInfoVersion() {
+        return mProperties.getProperty(ProjectProperties.PROPERTY_BUILD_TOOLS);
     }
 
     public static class LibraryDifference {
@@ -311,14 +339,6 @@ public final class ProjectState {
         return diff;
     }
 
-    public void setApkSettings(ApkSettings apkSettings) {
-        mApkSettings = apkSettings;
-    }
-
-    public ApkSettings getApkSettings() {
-        return mApkSettings;
-    }
-
     /**
      * Returns the list of {@link LibraryState}.
      */
@@ -330,13 +350,13 @@ public final class ProjectState {
 
     /**
      * Returns all the <strong>resolved</strong> library projects, including indirect dependencies.
-     * The array is ordered to match the library priority order for resource processing with
+     * The list is ordered to match the library priority order for resource processing with
      * <code>aapt</code>.
      * <p/>If some dependencies are not resolved (or their projects is not opened in Eclipse),
      * they will not show up in this list.
-     * @return the resolved projects. May be an empty list.
+     * @return the resolved projects as an unmodifiable list. May be an empty.
      */
-    public IProject[] getFullLibraryProjects() {
+    public List<IProject> getFullLibraryProjects() {
         return mLibraryProjects;
     }
 
@@ -379,13 +399,13 @@ public final class ProjectState {
      *
      * @return the matching LibraryState or <code>null</code>
      *
-     * @see #needs(IProject)
+     * @see #needs(ProjectState)
      */
     public LibraryState getLibrary(IProject library) {
         synchronized (mLibraries) {
             for (LibraryState state : mLibraries) {
                 ProjectState ps = state.getProjectState();
-                if (ps != null && ps.equals(library)) {
+                if (ps != null && ps.getProject().equals(library)) {
                     return state;
                 }
             }
@@ -485,7 +505,7 @@ public final class ProjectState {
      * and the {@link LibraryState} for the library is returned.
      * <p/>Updating the project does two things:<ul>
      * <li>Update LibraryState with new relative path and new {@link IProject} object.</li>
-     * <li>Update the main project's <code>default.properties</code> with the new relative path
+     * <li>Update the main project's <code>project.properties</code> with the new relative path
      * for the changed library.</li>
      * </ul>
      *
@@ -521,7 +541,7 @@ public final class ProjectState {
                             state.setRelativePath(newRelativePath);
                             state.setProject(newLibraryState);
 
-                            // update the default.properties file
+                            // update the project.properties file
                             IStatus status = replaceLibraryProperty(oldProperty, newRelativePath);
                             if (status != null) {
                                 if (status.getSeverity() != IStatus.OK) {
@@ -554,12 +574,40 @@ public final class ProjectState {
         mParentProjects.remove(parentState);
     }
 
+    public List<ProjectState> getParentProjects() {
+        return Collections.unmodifiableList(mParentProjects);
+    }
+
+    /**
+     * Computes the transitive closure of projects referencing this project as a
+     * library project
+     *
+     * @return a collection (in any order) of project states for projects that
+     *         directly or indirectly include this project state's project as a
+     *         library project
+     */
+    public Collection<ProjectState> getFullParentProjects() {
+        Set<ProjectState> result = new HashSet<ProjectState>();
+        addParentProjects(result, this);
+        return result;
+    }
+
+    /** Adds all parent projects of the given project, transitively, into the given parent set */
+    private static void addParentProjects(Set<ProjectState> parents, ProjectState state) {
+        for (ProjectState s : state.mParentProjects) {
+            if (!parents.contains(s)) {
+                parents.add(s);
+                addParentProjects(parents, s);
+            }
+        }
+    }
+
     /**
      * Update the value of a library dependency.
      * <p/>This loops on all current dependency looking for the value to replace and then replaces
      * it.
      * <p/>This both updates the in-memory {@link #mProperties} values and on-disk
-     * default.properties file.
+     * project.properties file.
      * @param oldValue the old value to replace
      * @param newValue the new value to set.
      * @return the status of the replacement. If null, no replacement was done (value not found).
@@ -608,7 +656,7 @@ public final class ProjectState {
             buildFullLibraryDependencies(mLibraries, list);
         }
 
-        mLibraryProjects = list.toArray(new IProject[list.size()]);
+        mLibraryProjects = Collections.unmodifiableList(list);
     }
 
     /**

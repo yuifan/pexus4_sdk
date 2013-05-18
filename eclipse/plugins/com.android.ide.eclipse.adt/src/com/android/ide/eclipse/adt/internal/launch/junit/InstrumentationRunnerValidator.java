@@ -15,14 +15,14 @@
  */
 package com.android.ide.eclipse.adt.internal.launch.junit;
 
-import com.android.ide.eclipse.adt.AndroidConstants;
+import com.android.SdkConstants;
+import com.android.ide.common.xml.ManifestData;
+import com.android.ide.common.xml.ManifestData.Instrumentation;
+import com.android.ide.common.xml.ManifestData.UsesLibrary;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.internal.launch.LaunchMessages;
 import com.android.ide.eclipse.adt.internal.project.AndroidManifestHelper;
 import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
-import com.android.sdklib.SdkConstants;
-import com.android.sdklib.xml.ManifestData;
-import com.android.sdklib.xml.ManifestData.Instrumentation;
-import com.android.sdklib.xml.ManifestData.UsesLibrary;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.CoreException;
@@ -80,7 +80,7 @@ class InstrumentationRunnerValidator {
     }
 
     /**
-     * Helper method to determine if given manifest has a <code>AndroidConstants.LIBRARY_TEST_RUNNER
+     * Helper method to determine if given manifest has a <code>SdkConstants.LIBRARY_TEST_RUNNER
      * </code> library reference
      *
      * @param manifestParser the {@link ManifestData} to search
@@ -88,7 +88,7 @@ class InstrumentationRunnerValidator {
      */
     private boolean hasTestRunnerLibrary(ManifestData manifestData) {
        for (UsesLibrary lib : manifestData.getUsesLibraries()) {
-           if (AndroidConstants.LIBRARY_TEST_RUNNER.equals(lib.getName())) {
+           if (AdtConstants.LIBRARY_TEST_RUNNER.equals(lib.getName())) {
                return true;
            }
        }
@@ -98,7 +98,7 @@ class InstrumentationRunnerValidator {
     /**
      * Return the set of instrumentation names for the Android project.
      *
-     * @return <code>null</code if error occurred parsing instrumentations, otherwise returns array
+     * @return <code>null</code> if error occurred parsing instrumentations, otherwise returns array
      * of instrumentation class names
      */
     String[] getInstrumentationNames() {
@@ -130,7 +130,7 @@ class InstrumentationRunnerValidator {
     String validateInstrumentationRunner(String instrumentation) {
         if (!mHasRunnerLibrary) {
             return String.format(LaunchMessages.InstrValidator_NoTestLibMsg_s,
-                    AndroidConstants.LIBRARY_TEST_RUNNER);
+                    AdtConstants.LIBRARY_TEST_RUNNER);
         }
         // check if this instrumentation is the standard test runner
         if (!instrumentation.equals(SdkConstants.CLASS_INSTRUMENTATION_RUNNER)) {

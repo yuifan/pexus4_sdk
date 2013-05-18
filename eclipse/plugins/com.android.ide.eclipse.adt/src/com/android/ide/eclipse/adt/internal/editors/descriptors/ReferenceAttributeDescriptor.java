@@ -16,13 +16,15 @@
 
 package com.android.ide.eclipse.adt.internal.editors.descriptors;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
+import com.android.SdkConstants;
+import com.android.ide.common.api.IAttributeInfo;
+import com.android.ide.common.api.IAttributeInfo.Format;
+import com.android.ide.common.resources.platform.AttributeInfo;
 import com.android.ide.eclipse.adt.internal.editors.ui.ResourceValueCellEditor;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiResourceAttributeNode;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
-import com.android.sdklib.SdkConstants;
+import com.android.resources.ResourceType;
 
 import org.eclipse.jface.viewers.CellEditor;
 import org.eclipse.swt.widgets.Composite;
@@ -33,22 +35,36 @@ import org.eclipse.swt.widgets.Composite;
  */
 public final class ReferenceAttributeDescriptor extends TextAttributeDescriptor {
 
-    /** The {@link ResourceType} that this reference attribute can accept. It can be null,
-     * in which case any reference type can be used. */
+    /**
+     * The {@link ResourceType} that this reference attribute can accept. It can be null,
+     * in which case any reference type can be used.
+     */
     private ResourceType mResourceType;
+
+    /**
+     * Used by {@link DescriptorsUtils} to create instances of this descriptor.
+     */
+    public static final ITextAttributeCreator CREATOR = new ITextAttributeCreator() {
+        @Override
+        public TextAttributeDescriptor create(String xmlLocalName,
+                String nsUri, IAttributeInfo attrInfo) {
+            return new ReferenceAttributeDescriptor(
+                    ResourceType.DRAWABLE,
+                    xmlLocalName, nsUri,
+                    new AttributeInfo(xmlLocalName, Format.REFERENCE_SET));
+        }
+    };
 
     /**
      * Creates a reference attributes that can contain any type of resources.
      * @param xmlLocalName The XML name of the attribute (case sensitive)
-     * @param uiName The UI name of the attribute. Cannot be an empty string and cannot be null.
      * @param nsUri The URI of the attribute. Can be null if attribute has no namespace.
      *              See {@link SdkConstants#NS_RESOURCES} for a common value.
-     * @param tooltip A non-empty tooltip string or null
      * @param attrInfo The {@link IAttributeInfo} of this attribute. Can't be null.
      */
-    public ReferenceAttributeDescriptor(String xmlLocalName, String uiName, String nsUri,
-            String tooltip, IAttributeInfo attrInfo) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+    public ReferenceAttributeDescriptor(String xmlLocalName, String nsUri,
+            IAttributeInfo attrInfo) {
+        super(xmlLocalName, nsUri, attrInfo);
     }
 
     /**
@@ -57,16 +73,13 @@ public final class ReferenceAttributeDescriptor extends TextAttributeDescriptor 
      * @param resourceType The specific {@link ResourceType} that this reference attribute supports.
      * It can be <code>null</code>, in which case, all resource types are supported.
      * @param xmlLocalName The XML name of the attribute (case sensitive)
-     * @param uiName The UI name of the attribute. Cannot be an empty string and cannot be null.
      * @param nsUri The URI of the attribute. Can be null if attribute has no namespace.
      *              See {@link SdkConstants#NS_RESOURCES} for a common value.
-     * @param tooltip A non-empty tooltip string or null
      * @param attrInfo The {@link IAttributeInfo} of this attribute. Can't be null.
      */
     public ReferenceAttributeDescriptor(ResourceType resourceType,
-            String xmlLocalName, String uiName, String nsUri,
-            String tooltip, IAttributeInfo attrInfo) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+            String xmlLocalName, String nsUri, IAttributeInfo attrInfo) {
+        super(xmlLocalName, nsUri, attrInfo);
         mResourceType = resourceType;
     }
 

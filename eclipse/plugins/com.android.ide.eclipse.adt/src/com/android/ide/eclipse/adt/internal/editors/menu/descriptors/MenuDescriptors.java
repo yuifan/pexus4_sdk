@@ -16,43 +16,46 @@
 
 package com.android.ide.eclipse.adt.internal.editors.menu.descriptors;
 
+import static com.android.SdkConstants.ANDROID_NS_NAME;
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.TAG_MENU;
+
+import com.android.ide.common.resources.platform.DeclareStyleableInfo;
+import com.android.ide.eclipse.adt.AdtUtils;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.DescriptorsUtils;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.IDescriptorProvider;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.XmlnsAttributeDescriptor;
-import com.android.ide.eclipse.adt.internal.resources.DeclareStyleableInfo;
-import com.android.sdklib.SdkConstants;
 
 import java.util.ArrayList;
 import java.util.Map;
-
 
 /**
  * Complete description of the menu structure.
  */
 public final class MenuDescriptors implements IDescriptorProvider {
 
-    public static final String MENU_ROOT_ELEMENT = "menu"; //$NON-NLS-1$
-
     /** The root element descriptor. */
     private ElementDescriptor mDescriptor = null;
 
     /** @return the root descriptor. */
+    @Override
     public ElementDescriptor getDescriptor() {
         return mDescriptor;
     }
-    
+
+    @Override
     public ElementDescriptor[] getRootElementDescriptors() {
         return mDescriptor.getChildren();
     }
-    
+
     /**
      * Updates the document descriptor.
      * <p/>
      * It first computes the new children of the descriptor and then updates them
      * all at once.
-     * 
+     *
      * @param styleMap The map style => attributes from the attrs.xml file
      */
     public synchronized void updateDescriptors(Map<String, DeclareStyleableInfo> styleMap) {
@@ -65,10 +68,10 @@ public final class MenuDescriptors implements IDescriptorProvider {
         // A sub menu can contains sub items or sub groups:
         //  - sub groups can contain sub items
         //  - sub items cannot contain anything
-        
+
         if (mDescriptor == null) {
             mDescriptor = createElement(styleMap,
-                MENU_ROOT_ELEMENT, // xmlName
+                TAG_MENU, // xmlName
                 "Menu", // uiName,
                 null, // TODO SDK URL
                 null, // extraAttribute
@@ -95,7 +98,7 @@ public final class MenuDescriptors implements IDescriptorProvider {
                 false /* mandatory */);
 
         ElementDescriptor sub_menu = createElement(styleMap,
-                MENU_ROOT_ELEMENT, // xmlName //$NON-NLS-1$
+                TAG_MENU, // xmlName
                 "Sub-Menu", // uiName,
                 null, // TODO SDK URL
                 null, // extraAttribute
@@ -120,8 +123,8 @@ public final class MenuDescriptors implements IDescriptorProvider {
                 new ElementDescriptor[] { top_item }, // childrenElements,
                 false /* mandatory */);
 
-        XmlnsAttributeDescriptor xmlns = new XmlnsAttributeDescriptor("android", //$NON-NLS-1$
-                SdkConstants.NS_RESOURCES); 
+        XmlnsAttributeDescriptor xmlns = new XmlnsAttributeDescriptor(ANDROID_NS_NAME,
+                ANDROID_URI);
 
         updateElement(mDescriptor, styleMap, "Menu", xmlns); //$NON-NLS-1$
         mDescriptor.setChildren(new ElementDescriptor[] { top_item, top_group });
@@ -132,7 +135,7 @@ public final class MenuDescriptors implements IDescriptorProvider {
      * and the javadoc & attributes extracted from the style map if any.
      */
     private ElementDescriptor createElement(
-            Map<String, DeclareStyleableInfo> styleMap, 
+            Map<String, DeclareStyleableInfo> styleMap,
             String xmlName, String uiName, String sdkUrl,
             AttributeDescriptor extraAttribute,
             ElementDescriptor[] childrenElements, boolean mandatory) {
@@ -144,7 +147,7 @@ public final class MenuDescriptors implements IDescriptorProvider {
                 getStyleName(xmlName),
                 extraAttribute);
     }
-    
+
     /**
      * Updates an ElementDescriptor with the javadoc & attributes extracted from the style
      * map if any.
@@ -159,7 +162,7 @@ public final class MenuDescriptors implements IDescriptorProvider {
         if (style != null) {
             DescriptorsUtils.appendAttributes(descs,
                     null,   // elementName
-                    SdkConstants.NS_RESOURCES,
+                    ANDROID_URI,
                     style.getAttributes(),
                     null,   // requiredAttributes
                     null);  // overrides
@@ -183,12 +186,12 @@ public final class MenuDescriptors implements IDescriptorProvider {
      * - a "Menu" prefix, except for <menu> itself which is just "Menu".
      */
     private String getStyleName(String xmlName) {
-        String styleName = DescriptorsUtils.capitalize(xmlName);
+        String styleName = AdtUtils.capitalize(xmlName);
 
         // This is NOT the UI Name but the expected internal style name
         final String MENU_STYLE_BASE_NAME = "Menu"; //$NON-NLS-1$
-        
-        if (!styleName.equals(MENU_STYLE_BASE_NAME)) {        
+
+        if (!styleName.equals(MENU_STYLE_BASE_NAME)) {
             styleName = MENU_STYLE_BASE_NAME + styleName;
         }
         return styleName;

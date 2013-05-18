@@ -16,11 +16,16 @@
 
 package com.android.ide.eclipse.ddms.preferences;
 
-import com.android.ide.eclipse.ddms.DdmsPlugin;
-import com.android.ide.eclipse.ddms.views.DeviceView.HProfHandler;
 import com.android.ddmlib.DdmPreferences;
+import com.android.ddmlib.Log.LogLevel;
 import com.android.ddmuilib.DdmUiPreferences;
+import com.android.ide.eclipse.ddms.DdmsPlugin;
+import com.android.ide.eclipse.ddms.LogCatMonitor;
+import com.android.ide.eclipse.ddms.views.DeviceView.HProfHandler;
+import com.android.ide.eclipse.ddms.views.LogCatView;
 
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.content.IContentType;
 import org.eclipse.core.runtime.preferences.AbstractPreferenceInitializer;
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.swt.SWT;
@@ -64,6 +69,21 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
     public final static String ATTR_TIME_OUT =
         DdmsPlugin.PLUGIN_ID + ".timeOut"; //$NON-NLS-1$
 
+    public final static String ATTR_USE_ADBHOST =
+        DdmsPlugin.PLUGIN_ID + ".useAdbHost"; //$NON-NLS-1$
+
+    public final static String ATTR_ADBHOST_VALUE =
+        DdmsPlugin.PLUGIN_ID + ".adbHostValue"; //$NON-NLS-1$
+
+    public final static String ATTR_SWITCH_PERSPECTIVE =
+        DdmsPlugin.PLUGIN_ID + ".switchPerspective"; //$NON-NLS-1$
+
+    public final static String ATTR_PERSPECTIVE_ID =
+        DdmsPlugin.PLUGIN_ID + ".perspectiveId"; //$NON-NLS-1$
+
+    public static final String ATTR_PROFILER_BUFSIZE_MB =
+        DdmsPlugin.PLUGIN_ID + ".profilerBufferSizeMb"; //$NON-NLS-1$
+
     /*
      * (non-Javadoc)
      *
@@ -82,6 +102,8 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(ATTR_DEFAULT_HEAP_UPDATE,
                 DdmPreferences.DEFAULT_INITIAL_HEAP_UPDATE);
 
+        store.setDefault(ATTR_PROFILER_BUFSIZE_MB, DdmPreferences.DEFAULT_PROFILER_BUFFER_SIZE_MB);
+
         store.setDefault(ATTR_THREAD_INTERVAL, DdmUiPreferences.DEFAULT_THREAD_REFRESH_INTERVAL);
 
         String homeDir = System.getProperty("user.home"); //$NON-NLS-1$
@@ -92,9 +114,25 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(ATTR_LOGCAT_FONT,
                 new FontData("Courier", 10, SWT.NORMAL).toString()); //$NON-NLS-1$
 
-        store.setDefault(ATTR_HPROF_ACTION, HProfHandler.ACTION_OPEN);
+        // When obtaining hprof files from the device, default to opening the file
+        // only if there is a registered content type for the hprof extension.
+        store.setDefault(ATTR_HPROF_ACTION, HProfHandler.ACTION_SAVE);
+        for (IContentType contentType: Platform.getContentTypeManager().getAllContentTypes()) {
+            if (contentType.isAssociatedWith(HProfHandler.DOT_HPROF)) {
+                store.setDefault(ATTR_HPROF_ACTION, HProfHandler.ACTION_OPEN);
+                break;
+            }
+        }
 
         store.setDefault(ATTR_TIME_OUT, DdmPreferences.DEFAULT_TIMEOUT);
+
+        store.setDefault(ATTR_USE_ADBHOST, DdmPreferences.DEFAULT_USE_ADBHOST);
+        store.setDefault(ATTR_ADBHOST_VALUE, DdmPreferences.DEFAULT_ADBHOST_VALUE);
+        store.setDefault(ATTR_SWITCH_PERSPECTIVE, LogCatView.DEFAULT_SWITCH_PERSPECTIVE);
+        store.setDefault(ATTR_PERSPECTIVE_ID, LogCatView.DEFAULT_PERSPECTIVE_ID);
+
+        store.setDefault(LogCatMonitor.AUTO_MONITOR_PREFKEY, true);
+        store.setDefault(LogCatMonitor.AUTO_MONITOR_LOGLEVEL, LogLevel.VERBOSE.getStringValue());
     }
 
     /**
@@ -108,7 +146,10 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         DdmPreferences.setLogLevel(store.getString(ATTR_LOG_LEVEL));
         DdmPreferences.setInitialThreadUpdate(store.getBoolean(ATTR_DEFAULT_THREAD_UPDATE));
         DdmPreferences.setInitialHeapUpdate(store.getBoolean(ATTR_DEFAULT_HEAP_UPDATE));
+        DdmPreferences.setProfilerBufferSizeMb(store.getInt(ATTR_PROFILER_BUFSIZE_MB));
         DdmUiPreferences.setThreadRefreshInterval(store.getInt(ATTR_THREAD_INTERVAL));
         DdmPreferences.setTimeOut(store.getInt(ATTR_TIME_OUT));
+        DdmPreferences.setUseAdbHost(store.getBoolean(ATTR_USE_ADBHOST));
+        DdmPreferences.setAdbHostValue(store.getString(ATTR_ADBHOST_VALUE));
     }
 }

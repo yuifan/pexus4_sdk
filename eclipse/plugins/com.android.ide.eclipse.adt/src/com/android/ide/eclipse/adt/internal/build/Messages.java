@@ -8,11 +8,17 @@ public class Messages extends NLS {
 
     public static String AAPT_Error;
 
-    public static String AAPT_Exec_Error;
+    public static String AAPT_Exec_Error_s;
+
+    public static String AAPT_Exec_Error_d;
+
+    public static String AAPT_Exec_Error_Other_s;
 
     public static String Added_s_s_Needs_Updating;
 
-    public static String AIDL_Exec_Error;
+    public static String AIDL_Exec_Error_s;
+
+    public static String AIDL_Exec_Error_d;
 
     public static String AIDL_Java_Conflict;
 
@@ -92,11 +98,11 @@ public class Messages extends NLS {
 
     public static String Requires_1_5_Error;
 
-    public static String Requires_Class_Compatibility_5;
+    public static String Requires_Class_Compatibility_s;
 
-    public static String Requires_Compiler_Compliance_5;
+    public static String Requires_Compiler_Compliance_s;
 
-    public static String Requires_Source_Compatibility_5;
+    public static String Requires_Source_Compatibility_s;
 
     public static String s_Contains_Xml_Error;
 
@@ -118,6 +124,10 @@ public class Messages extends NLS {
 
     public static String Start_Full_Pre_Compiler;
 
+    public static String Skip_Post_Compiler;
+
+    public static String Start_Full_Post_Compiler;
+
     public static String Start_Inc_Apk_Build;
 
     public static String Start_Inc_Pre_Compiler;
@@ -127,6 +137,9 @@ public class Messages extends NLS {
     public static String Unparsed_AIDL_Errors;
 
     public static String Xml_Error;
+
+    public static String Proguard_Exec_Error;
+
     static {
         // initialize resource bundle
         NLS.initializeMessages(BUNDLE_NAME, Messages.class);

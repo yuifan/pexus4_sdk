@@ -16,14 +16,17 @@
 
 package com.android.ide.eclipse.adt.internal.ui;
 
-import com.android.ide.eclipse.adt.internal.resources.IResourceRepository;
-import com.android.ide.eclipse.adt.internal.resources.ResourceItem;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
-import com.android.ide.eclipse.adt.internal.resources.manager.ConfigurableResourceItem;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFile;
+import com.android.ide.common.resources.ResourceFile;
+import com.android.ide.common.resources.ResourceItem;
+import com.android.ide.common.resources.ResourceRepository;
+import com.android.resources.ResourceType;
 
 import org.eclipse.jface.viewers.ITreeContentProvider;
 import org.eclipse.jface.viewers.Viewer;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Content provider for the Resource Explorer TreeView.
@@ -40,10 +43,10 @@ import org.eclipse.jface.viewers.Viewer;
  * <li>{@link ResourceFile}. (optional) This represents a particular version of the
  * {@link ResourceItem}. It is displayed as a list of resource qualifier.
  * </li>
- * </ul> 
- * </ul> 
- * </ul> 
- * 
+ * </ul>
+ * </ul>
+ * </ul>
+ *
  * @see ResourceLabelProvider
  */
 public class ResourceContentProvider implements ITreeContentProvider {
@@ -51,10 +54,10 @@ public class ResourceContentProvider implements ITreeContentProvider {
     /**
      * The current ProjectResources being displayed.
      */
-    private IResourceRepository mResources;
-    
+    private ResourceRepository mResources;
+
     private boolean mFullLevels;
-    
+
    /**
      * Constructs a new content providers for resource display.
      * @param fullLevels if <code>true</code> the content provider will suppport all 3 levels. If
@@ -64,47 +67,58 @@ public class ResourceContentProvider implements ITreeContentProvider {
         mFullLevels = fullLevels;
     }
 
+    @Override
     public Object[] getChildren(Object parentElement) {
         if (parentElement instanceof ResourceType) {
-            return mResources.getResources((ResourceType)parentElement);
-        } else if (mFullLevels && parentElement instanceof ConfigurableResourceItem) {
-            return ((ConfigurableResourceItem)parentElement).getSourceFileArray();
+            Object[] array = mResources.getResourceItemsOfType(
+                    (ResourceType)parentElement).toArray();
+            Arrays.sort(array);
+            return array;
+        } else if (mFullLevels && parentElement instanceof ResourceItem) {
+            return ((ResourceItem)parentElement).getSourceFileArray();
         }
         return null;
     }
 
+    @Override
     public Object getParent(Object element) {
         // pass
         return null;
     }
 
+    @Override
     public boolean hasChildren(Object element) {
         if (element instanceof ResourceType) {
-            return mResources.hasResources((ResourceType)element);
-        } else if (mFullLevels && element instanceof ConfigurableResourceItem) {
-            return ((ConfigurableResourceItem)element).hasAlternates();
+            return mResources.hasResourcesOfType((ResourceType)element);
+        } else if (mFullLevels && element instanceof ResourceItem) {
+            return ((ResourceItem)element).hasAlternates();
         }
         return false;
     }
 
+    @Override
     public Object[] getElements(Object inputElement) {
-        if (inputElement instanceof IResourceRepository) {
-            if ((IResourceRepository)inputElement == mResources) {
+        if (inputElement instanceof ResourceRepository) {
+            if ((ResourceRepository)inputElement == mResources) {
                 // get the top level resources.
-                return mResources.getAvailableResourceTypes();
+                List<ResourceType> types = mResources.getAvailableResourceTypes();
+                Collections.sort(types);
+                return types.toArray();
             }
         }
 
         return new Object[0];
     }
 
+    @Override
     public void dispose() {
         // pass
     }
 
+    @Override
     public void inputChanged(Viewer viewer, Object oldInput, Object newInput) {
-        if (newInput instanceof IResourceRepository) {
-             mResources = (IResourceRepository)newInput;
+        if (newInput instanceof ResourceRepository) {
+             mResources = (ResourceRepository)newInput;
         }
     }
 }

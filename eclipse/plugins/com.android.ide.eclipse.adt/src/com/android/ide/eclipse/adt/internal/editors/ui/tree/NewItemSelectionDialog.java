@@ -29,9 +29,11 @@ import org.eclipse.jface.viewers.ILabelProvider;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.dialogs.AbstractElementListSelectionDialog;
@@ -40,9 +42,10 @@ import org.eclipse.ui.part.FileEditorInput;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.Map.Entry;
+import java.util.TreeMap;
 
 /**
  * A selection dialog to select the type of the new element node to
@@ -105,6 +108,7 @@ public class NewItemSelectionDialog extends AbstractElementListSelectionDialog {
         setMultipleSelection(false);
 
         setValidator(new ISelectionStatusValidator() {
+            @Override
             public IStatus validate(Object[] selection) {
                 if (selection.length == 1 && selection[0] instanceof ViewElementDescriptor) {
                     return new Status(IStatus.OK, // severity
@@ -276,6 +280,15 @@ public class NewItemSelectionDialog extends AbstractElementListSelectionDialog {
         createFilterText(contents);
         createFilteredList(contents);
 
+        // We don't want the builtin message area label (we use a radio control
+        // instead), but if we don't create it, Bad Stuff happens on
+        // Eclipse 3.8 and later (see issue 32527).
+        Label label = createMessageArea(contents);
+        if (label != null) {
+            GridData data = (GridData) label.getLayoutData();
+            data.exclude = true;
+        }
+
         // Initialize the list state.
         // This must be done after the filtered list as been created.
         chooseNode(mChosenRootNode);
@@ -299,7 +312,7 @@ public class NewItemSelectionDialog extends AbstractElementListSelectionDialog {
             String name = mInitialXmlName;
             boolean partial = name.startsWith("*");   //$NON-NLS-1$
             if (partial) {
-                name = name.substring(1).toLowerCase();
+                name = name.substring(1).toLowerCase(Locale.US);
             }
 
             for (ElementDescriptor desc : getAllowedDescriptors(rootNode)) {
@@ -307,7 +320,7 @@ public class NewItemSelectionDialog extends AbstractElementListSelectionDialog {
                     initialElement = desc;
                     break;
                 } else if (partial) {
-                    String name2 = desc.getXmlLocalName().toLowerCase();
+                    String name2 = desc.getXmlLocalName().toLowerCase(Locale.US);
                     if (name.startsWith(name2) || name2.startsWith(name)) {
                         initialElement = desc;
                         break;

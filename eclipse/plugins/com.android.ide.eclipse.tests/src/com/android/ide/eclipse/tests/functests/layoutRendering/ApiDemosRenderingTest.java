@@ -16,37 +16,51 @@
 
 package com.android.ide.eclipse.tests.functests.layoutRendering;
 
-import com.android.ide.eclipse.adt.internal.resources.configurations.FolderConfiguration;
-import com.android.ide.eclipse.adt.internal.resources.configurations.KeyboardStateQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.NavigationMethodQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.PixelDensityQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenDimensionQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenOrientationQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenRatioQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenSizeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.TextInputMethodQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.TouchScreenQualifier;
-import com.android.ide.eclipse.adt.internal.resources.manager.ProjectResources;
+import com.android.SdkConstants;
+import com.android.ide.common.rendering.LayoutLibrary;
+import com.android.ide.common.rendering.api.AdapterBinding;
+import com.android.ide.common.rendering.api.HardwareConfig;
+import com.android.ide.common.rendering.api.ILayoutPullParser;
+import com.android.ide.common.rendering.api.IProjectCallback;
+import com.android.ide.common.rendering.api.RenderSession;
+import com.android.ide.common.rendering.api.ResourceReference;
+import com.android.ide.common.rendering.api.ResourceValue;
+import com.android.ide.common.rendering.api.SessionParams;
+import com.android.ide.common.rendering.api.SessionParams.RenderingMode;
+import com.android.ide.common.resources.ResourceItem;
+import com.android.ide.common.resources.ResourceRepository;
+import com.android.ide.common.resources.ResourceResolver;
+import com.android.ide.common.resources.configuration.DensityQualifier;
+import com.android.ide.common.resources.configuration.FolderConfiguration;
+import com.android.ide.common.resources.configuration.KeyboardStateQualifier;
+import com.android.ide.common.resources.configuration.NavigationMethodQualifier;
+import com.android.ide.common.resources.configuration.NavigationStateQualifier;
+import com.android.ide.common.resources.configuration.ScreenDimensionQualifier;
+import com.android.ide.common.resources.configuration.ScreenHeightQualifier;
+import com.android.ide.common.resources.configuration.ScreenOrientationQualifier;
+import com.android.ide.common.resources.configuration.ScreenRatioQualifier;
+import com.android.ide.common.resources.configuration.ScreenSizeQualifier;
+import com.android.ide.common.resources.configuration.ScreenWidthQualifier;
+import com.android.ide.common.resources.configuration.SmallestScreenWidthQualifier;
+import com.android.ide.common.resources.configuration.TextInputMethodQualifier;
+import com.android.ide.common.resources.configuration.TouchScreenQualifier;
+import com.android.ide.common.sdk.LoadStatus;
 import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
 import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData;
-import com.android.ide.eclipse.adt.internal.sdk.LoadStatus;
-import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData.LayoutBridge;
-import com.android.ide.eclipse.tests.SdkTestCase;
-import com.android.layoutlib.api.ILayoutResult;
-import com.android.layoutlib.api.IProjectCallback;
-import com.android.layoutlib.api.IResourceValue;
-import com.android.layoutlib.api.IXmlPullParser;
+import com.android.ide.eclipse.tests.SdkLoadingTestCase;
+import com.android.io.FolderWrapper;
+import com.android.resources.Density;
+import com.android.resources.Keyboard;
+import com.android.resources.KeyboardState;
+import com.android.resources.Navigation;
+import com.android.resources.NavigationState;
+import com.android.resources.ResourceType;
+import com.android.resources.ScreenOrientation;
+import com.android.resources.ScreenRatio;
+import com.android.resources.ScreenSize;
+import com.android.resources.TouchScreen;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.SdkConstants;
-import com.android.sdklib.io.FolderWrapper;
-import com.android.sdklib.resources.Density;
-import com.android.sdklib.resources.Keyboard;
-import com.android.sdklib.resources.KeyboardState;
-import com.android.sdklib.resources.Navigation;
-import com.android.sdklib.resources.ScreenOrientation;
-import com.android.sdklib.resources.ScreenRatio;
-import com.android.sdklib.resources.ScreenSize;
-import com.android.sdklib.resources.TouchScreen;
+import com.android.util.Pair;
 
 import org.kxml2.io.KXmlParser;
 import org.xmlpull.v1.XmlPullParser;
@@ -60,18 +74,24 @@ import java.util.Map;
 
 import javax.imageio.ImageIO;
 
-public class ApiDemosRenderingTest extends SdkTestCase {
+public class ApiDemosRenderingTest extends SdkLoadingTestCase {
 
     /**
-     * Custom parser that implements {@link IXmlPullParser} (which itself extends
+     * Custom parser that implements {@link ILayoutPullParser} (which itself extends
      * {@link XmlPullParser}).
      */
-    private final static class TestParser extends KXmlParser implements IXmlPullParser {
+    private final static class TestParser extends KXmlParser implements ILayoutPullParser {
         /**
          * Since we're not going to go through the result of the rendering/layout, we can return
          * null for the View Key.
          */
-        public Object getViewKey() {
+        @Override
+        public Object getViewCookie() {
+            return null;
+        }
+
+        @Override
+        public ILayoutPullParser getParser(String layoutName) {
             return null;
         }
     }
@@ -85,21 +105,18 @@ public class ApiDemosRenderingTest extends SdkTestCase {
         // in some cases, the id that getResourceValue(String type, String name) returns
         // will be sent back to get the type/name. This map stores the id/type/name we generate
         // to be able to do the reverse resolution.
-        private Map<Integer, String[]> mResourceMap = new HashMap<Integer, String[]>();
+        private Map<Integer, Pair<ResourceType, String>> mResourceMap =
+            new HashMap<Integer, Pair<ResourceType, String>>();
 
         private boolean mCustomViewAttempt = false;
 
+        @Override
         public String getNamespace() {
             // TODO: read from the ApiDemos manifest.
             return "com.example.android.apis";
         }
 
-        public Integer getResourceValue(String type, String name) {
-            Integer result = ++mIdCounter;
-            mResourceMap.put(result, new String[] { name, type });
-            return result;
-        }
-
+        @Override
         @SuppressWarnings("unchecked")
         public Object loadView(String name, Class[] constructorSignature, Object[] constructorArgs)
                 throws ClassNotFoundException, Exception {
@@ -107,14 +124,46 @@ public class ApiDemosRenderingTest extends SdkTestCase {
             return null;
         }
 
-        public String[] resolveResourceValue(int id) {
+        @Override
+        public Integer getResourceId(ResourceType type, String name) {
+            Integer result = ++mIdCounter;
+            mResourceMap.put(result, Pair.of(type, name));
+            return result;
+        }
+
+        @Override
+        public Pair<ResourceType, String> resolveResourceId(int id) {
             return mResourceMap.get(id);
         }
 
-        public String resolveResourceValue(int[] id) {
+        @Override
+        public String resolveResourceId(int[] id) {
             return null;
         }
 
+        @Override
+        public ILayoutPullParser getParser(String layoutName) {
+            return null;
+        }
+
+        @Override
+        public Object getAdapterItemValue(ResourceReference adapterView, Object adapterCookie,
+                ResourceReference itemRef, int fullPosition, int typePosition,
+                int fullChildPosition, int typeChildPosition,
+                ResourceReference viewRef, ViewAttribute viewAttribute, Object defaultValue) {
+            return null;
+        }
+
+        @Override
+        public AdapterBinding getAdapterBinding(ResourceReference adapterView,
+                Object adapterCookie, Object viewObject) {
+            return null;
+        }
+
+        @Override
+        public ILayoutPullParser getParser(ResourceValue layoutResource) {
+            return null;
+        }
     }
 
     public void testApiDemos() throws IOException, XmlPullParserException {
@@ -147,9 +196,9 @@ public class ApiDemosRenderingTest extends SdkTestCase {
             fail("No AndroidData!");
         }
 
-        LayoutBridge bridge = data.getLayoutBridge();
-        if (bridge.status != LoadStatus.LOADED || bridge.bridge == null) {
-            fail("Fail to load the bridge");
+        LayoutLibrary layoutLib = data.getLayoutLibrary();
+        if (layoutLib.getStatus() != LoadStatus.LOADED) {
+            fail("Fail to load the bridge: " + layoutLib.getLoadMessage());
         }
 
         FolderWrapper resFolder = new FolderWrapper(sampleProject, SdkConstants.FD_RES);
@@ -158,25 +207,30 @@ public class ApiDemosRenderingTest extends SdkTestCase {
         }
 
         // look for the layout folder
-        File layoutFolder = new File(resFolder, SdkConstants.FD_LAYOUT);
+        File layoutFolder = new File(resFolder, SdkConstants.FD_RES_LAYOUT);
         if (layoutFolder.isDirectory() == false) {
             fail("Sample project has no layout folder!");
         }
 
         // first load the project's target framework resource
-        ProjectResources framework = ResourceManager.getInstance().loadFrameworkResources(target);
+        ResourceRepository framework = ResourceManager.getInstance().loadFrameworkResources(target);
 
         // now load the project resources
-        ProjectResources project = new ProjectResources(null /*project*/);
-        ResourceManager.getInstance().loadResources(project, resFolder);
+        ResourceRepository project = new ResourceRepository(resFolder, false) {
+            @Override
+            protected ResourceItem createResourceItem(String name) {
+                return new ResourceItem(name);
+            }
+
+        };
 
         // Create a folder configuration that will be used for the rendering:
         FolderConfiguration config = getConfiguration();
 
         // get the configured resources
-        Map<String, Map<String, IResourceValue>> configuredFramework =
+        Map<ResourceType, Map<String, ResourceValue>> configuredFramework =
                 framework.getConfiguredResources(config);
-        Map<String, Map<String, IResourceValue>> configuredProject =
+        Map<ResourceType, Map<String, ResourceValue>> configuredProject =
                 project.getConfiguredResources(config);
 
         boolean saveFiles = System.getenv("save_file") != null;
@@ -193,35 +247,44 @@ public class ApiDemosRenderingTest extends SdkTestCase {
 
             ProjectCallBack projectCallBack = new ProjectCallBack();
 
-            ILayoutResult result = bridge.bridge.computeLayout(
-                    parser,
-                    null /*projectKey*/,
+            ResourceResolver resolver = ResourceResolver.create(
+                    configuredProject, configuredFramework,
+                    "Theme", false /*isProjectTheme*/);
+
+            HardwareConfig hardwareConfig = new HardwareConfig(
                     320,
                     480,
-                    false, //renderFullSize
-                    160, //density
+                    Density.MEDIUM,
                     160, //xdpi
                     160, // ydpi
-                    "Theme", //themeName
-                    false, //isProjectTheme
-                    configuredProject,
-                    configuredFramework,
-                    projectCallBack,
-                    null //logger
-                    );
+                    ScreenSize.NORMAL,
+                    ScreenOrientation.PORTRAIT,
+                    false /*software buttons */);
 
-            if (result.getSuccess() != ILayoutResult.SUCCESS) {
+            RenderSession session = layoutLib.createSession(new SessionParams(
+                    parser,
+                    RenderingMode.NORMAL,
+                    null /*projectKey*/,
+                    hardwareConfig,
+                    resolver,
+                    projectCallBack,
+                    1, // minSdkVersion
+                    1, // targetSdkVersion
+                    null //logger
+                    ));
+
+            if (session.getResult().isSuccess() == false) {
                 if (projectCallBack.mCustomViewAttempt == false) {
                     System.out.println("FAILED");
                     fail(String.format("Rendering %1$s: %2$s", layout.getName(),
-                            result.getErrorMessage()));
+                            session.getResult().getErrorMessage()));
                 } else {
                     System.out.println("Ignore custom views for now");
                 }
             } else {
                 if (saveFiles) {
                     File tmp = File.createTempFile(layout.getName(), ".png");
-                    ImageIO.write(result.getImage(), "png", tmp);
+                    ImageIO.write(session.getImage(), "png", tmp);
                 }
                 System.out.println("Success!");
             }
@@ -238,15 +301,21 @@ public class ApiDemosRenderingTest extends SdkTestCase {
         FolderConfiguration config = new FolderConfiguration();
 
         // this matches an ADP1.
+        config.addQualifier(new SmallestScreenWidthQualifier(320));
+        config.addQualifier(new ScreenWidthQualifier(320));
+        config.addQualifier(new ScreenHeightQualifier(480));
         config.addQualifier(new ScreenSizeQualifier(ScreenSize.NORMAL));
         config.addQualifier(new ScreenRatioQualifier(ScreenRatio.NOTLONG));
         config.addQualifier(new ScreenOrientationQualifier(ScreenOrientation.PORTRAIT));
-        config.addQualifier(new PixelDensityQualifier(Density.MEDIUM));
+        config.addQualifier(new DensityQualifier(Density.MEDIUM));
         config.addQualifier(new TouchScreenQualifier(TouchScreen.FINGER));
         config.addQualifier(new KeyboardStateQualifier(KeyboardState.HIDDEN));
         config.addQualifier(new TextInputMethodQualifier(Keyboard.QWERTY));
+        config.addQualifier(new NavigationStateQualifier(NavigationState.HIDDEN));
         config.addQualifier(new NavigationMethodQualifier(Navigation.TRACKBALL));
         config.addQualifier(new ScreenDimensionQualifier(480, 320));
+
+        config.updateScreenWidthAndHeight();
 
         return config;
     }

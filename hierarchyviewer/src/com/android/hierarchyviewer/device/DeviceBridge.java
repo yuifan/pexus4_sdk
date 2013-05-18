@@ -21,7 +21,9 @@ import com.android.ddmlib.AndroidDebugBridge;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.Log;
 import com.android.ddmlib.MultiLineReceiver;
+import com.android.ddmlib.ShellCommandUnresponsiveException;
 import com.android.ddmlib.TimeoutException;
+import com.android.hierarchyviewer.scene.VersionLoader;
 
 import java.io.IOException;
 import java.io.File;
@@ -55,10 +57,6 @@ public class DeviceBridge {
         AndroidDebugBridge.addDeviceChangeListener(listener);
     }
 
-    public static void stopListenForDevices(AndroidDebugBridge.IDeviceChangeListener listener) {
-        AndroidDebugBridge.removeDeviceChangeListener(listener);
-    }
-
     public static IDevice[] getDevices() {
         return bridge.getDevices();
     }
@@ -70,8 +68,19 @@ public class DeviceBridge {
             if (device.isOnline()) {
                 device.executeShellCommand(buildIsServerRunningShellCommand(),
                         new BooleanResultReader(result));
+                if (!result[0]) {
+                    if (VersionLoader.loadProtocolVersion(device) > 2) {
+                        result[0] = true;
+                    }
+                }
             }
         } catch (IOException e) {
+            e.printStackTrace();
+        } catch (TimeoutException e) {
+            e.printStackTrace();
+        } catch (AdbCommandRejectedException e) {
+            e.printStackTrace();
+        } catch (ShellCommandUnresponsiveException e) {
             e.printStackTrace();
         }
         return result[0];
@@ -91,6 +100,12 @@ public class DeviceBridge {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } catch (TimeoutException e) {
+            e.printStackTrace();
+        } catch (AdbCommandRejectedException e) {
+            e.printStackTrace();
+        } catch (ShellCommandUnresponsiveException e) {
+            e.printStackTrace();
         }
         return result[0];
     }
@@ -104,6 +119,12 @@ public class DeviceBridge {
                         new BooleanResultReader(result));
             }
         } catch (IOException e) {
+            e.printStackTrace();
+        } catch (TimeoutException e) {
+            e.printStackTrace();
+        } catch (AdbCommandRejectedException e) {
+            e.printStackTrace();
+        } catch (ShellCommandUnresponsiveException e) {
             e.printStackTrace();
         }
         return result[0];

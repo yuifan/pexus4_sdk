@@ -16,12 +16,11 @@
 
 package com.android.ide.eclipse.adt.internal.editors.descriptors;
 
-import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
+import com.android.SdkConstants;
+import com.android.ide.common.api.IAttributeInfo;
 import com.android.ide.eclipse.adt.internal.editors.IconFactory;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
-import com.android.sdklib.SdkConstants;
 
 import org.eclipse.swt.graphics.Image;
 
@@ -35,7 +34,9 @@ import org.eclipse.swt.graphics.Image;
  * This is an abstract class. Derived classes must implement data description and return
  * the correct UiAttributeNode-derived class.
  */
-public abstract class AttributeDescriptor {
+public abstract class AttributeDescriptor implements Comparable<AttributeDescriptor> {
+    public static final String ATTRIBUTE_ICON_FILENAME = "attribute"; //$NON-NLS-1$
+
     private final String mXmlLocalName;
     private final String mNsUri;
     private final IAttributeInfo mAttrInfo;
@@ -53,6 +54,7 @@ public abstract class AttributeDescriptor {
      *              or attribute separator, all of which do not represent any real attribute.)
      */
     public AttributeDescriptor(String xmlLocalName, String nsUri, IAttributeInfo attrInfo) {
+        assert xmlLocalName != null;
         mXmlLocalName = xmlLocalName;
         mNsUri = nsUri;
         mAttrInfo = attrInfo;
@@ -95,18 +97,13 @@ public abstract class AttributeDescriptor {
 
     /**
      * Returns an optional icon for the attribute.
-     * <p/>
-     * By default this tries to return an icon based on the XML name of the attribute.
-     * If this fails, it tries to return the default Android logo as defined in the
-     * plugin. If all fails, it returns null.
+     * This icon is generic, that is all attribute descriptors have the same icon
+     * no matter what they represent.
      *
      * @return An icon for this element or null.
      */
-    public Image getIcon() {
-        IconFactory factory = IconFactory.getInstance();
-        Image icon;
-        icon = factory.getIcon(getXmlLocalName(), IconFactory.COLOR_RED, IconFactory.SHAPE_CIRCLE);
-        return icon != null ? icon : AdtPlugin.getAndroidLogo();
+    public Image getGenericIcon() {
+        return IconFactory.getInstance().getIcon(ATTRIBUTE_ICON_FILENAME);
     }
 
     /**
@@ -115,4 +112,10 @@ public abstract class AttributeDescriptor {
      *         attribute has no user interface.
      */
     public abstract UiAttributeNode createUiNode(UiElementNode uiParent);
+
+    // Implements Comparable<AttributeDescriptor>
+    @Override
+    public int compareTo(AttributeDescriptor other) {
+        return mXmlLocalName.compareTo(other.mXmlLocalName);
+    }
 }

@@ -16,8 +16,9 @@
 
 package com.android.ide.eclipse.adt.internal.editors.manifest.model;
 
+import com.android.SdkConstants;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
 import com.android.ide.eclipse.adt.internal.editors.AndroidXmlEditor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
@@ -26,8 +27,7 @@ import com.android.ide.eclipse.adt.internal.editors.ui.SectionHelper;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiTextAttributeNode;
 import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
-import com.android.sdklib.SdkConstants;
-import com.android.sdklib.xml.AndroidManifest;
+import com.android.xml.AndroidManifest;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -82,6 +82,10 @@ import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.w3c.dom.Element;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Represents an XML attribute for a class, that can be modified using a simple text field or
@@ -112,6 +116,7 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
         @Override
         public ITypeInfoFilterExtension getFilterExtension() {
             return new ITypeInfoFilterExtension() {
+                @Override
                 public boolean select(ITypeInfoRequestor typeInfoRequestor) {
 
                     boolean projectOnly = mUseProjectOnly;
@@ -291,6 +296,7 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
     @Override
     protected void onAddValidators(final Text text) {
         ModifyListener listener = new ModifyListener() {
+            @Override
             public void modifyText(ModifyEvent e) {
                 try {
                     String textValue = text.getText().trim();
@@ -327,6 +333,7 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
 
         // Make sure the validator removes its message(s) when the widget is disposed
         text.addDisposeListener(new DisposeListener() {
+            @Override
             public void widgetDisposed(DisposeEvent e) {
                 // we don't want to use setErrorMessage, because we don't want to reset
                 // the error flag in the UiAttributeNode
@@ -394,7 +401,7 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
             if (className.startsWith(".")) { //$NON-NLS-1$
                 fullClassName = packageName + className;
             } else {
-                String[] segments = className.split(AndroidConstants.RE_DOT);
+                String[] segments = className.split(AdtConstants.RE_DOT);
                 if (segments.length == 1) {
                     fullClassName = packageName + "." + className; //$NON-NLS-1$
                 }
@@ -503,7 +510,7 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
             // look for how many segments we have left.
             // if one, just write it that way.
             // if more than one, write it with a leading dot.
-            String[] packages = name.split(AndroidConstants.RE_DOT);
+            String[] packages = name.split(AdtConstants.RE_DOT);
             if (packages.length == 1) {
                 text.setText(name);
             } else {
@@ -683,7 +690,46 @@ public class UiClassAttributeNode extends UiTextAttributeNode {
 
     @Override
     public String[] getPossibleValues(String prefix) {
-        // TODO: compute a list of existing classes for content assist completion
+        // Compute a list of existing classes for content assist completion
+        IProject project = getProject();
+        if (project == null || mReferenceClass == null) {
+            return null;
+        }
+
+        try {
+            IJavaProject javaProject = BaseProjectHelper.getJavaProject(project);
+            IType type = javaProject.findType(mReferenceClass);
+            // Use sets because query sometimes repeats the same class
+            Set<String> libraryTypes = new HashSet<String>(80);
+            Set<String> localTypes = new HashSet<String>(30);
+            if (type != null) {
+                ITypeHierarchy hierarchy = type.newTypeHierarchy(new NullProgressMonitor());
+                IType[] allSubtypes = hierarchy.getAllSubtypes(type);
+                for (IType subType : allSubtypes) {
+                    int flags = subType.getFlags();
+                    if (Flags.isPublic(flags) && !Flags.isAbstract(flags)) {
+                        String fqcn = subType.getFullyQualifiedName();
+                        if (subType.getResource() != null) {
+                            localTypes.add(fqcn);
+                        } else {
+                            libraryTypes.add(fqcn);
+                        }
+                    }
+                }
+            }
+
+            List<String> local = new ArrayList<String>(localTypes);
+            List<String> library = new ArrayList<String>(libraryTypes);
+            Collections.sort(local);
+            Collections.sort(library);
+            List<String> combined = new ArrayList<String>(local.size() + library.size());
+            combined.addAll(local);
+            combined.addAll(library);
+            return combined.toArray(new String[combined.size()]);
+        } catch (Exception e) {
+            AdtPlugin.log(e, null);
+        }
+
         return null;
     }
 }

@@ -16,18 +16,20 @@
 
 package com.android.ide.eclipse.adt.internal.wizards.export;
 
+import com.android.annotations.Nullable;
 import com.android.ide.eclipse.adt.AdtPlugin;
+import com.android.ide.eclipse.adt.internal.utils.FingerprintUtils;
 import com.android.ide.eclipse.adt.internal.preferences.AdtPrefs.BuildVerbosity;
-import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
+import com.android.ide.eclipse.adt.internal.project.ExportHelper;
 import com.android.ide.eclipse.adt.internal.project.ProjectHelper;
-import com.android.sdklib.internal.build.KeystoreHelper;
-import com.android.sdklib.internal.build.SignedJarBuilder;
 import com.android.sdklib.internal.build.DebugKeyProvider.IKeyGenOutput;
+import com.android.sdklib.internal.build.KeystoreHelper;
+import com.android.sdklib.util.GrabProcessOutput;
+import com.android.sdklib.util.GrabProcessOutput.IProcessOutput;
+import com.android.sdklib.util.GrabProcessOutput.Wait;
 
-import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
-import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.jface.operation.IRunnableWithProgress;
@@ -42,31 +44,25 @@ import org.eclipse.ui.IExportWizard;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.PlatformUI;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.security.KeyStore;
-import java.security.PrivateKey;
 import java.security.KeyStore.PrivateKeyEntry;
+import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.Map.Entry;
 
 /**
  * Export wizard to export an apk signed with a release key/certificate.
  */
 public final class ExportWizard extends Wizard implements IExportWizard {
 
-    private static final String PROJECT_LOGO_LARGE = "icons/android_large.png"; //$NON-NLS-1$
+    private static final String PROJECT_LOGO_LARGE = "icons/android-64.png"; //$NON-NLS-1$
 
     private static final String PAGE_PROJECT_CHECK = "Page_ProjectCheck"; //$NON-NLS-1$
     private static final String PAGE_KEYSTORE_SELECTION = "Page_KeystoreSelection"; //$NON-NLS-1$
@@ -77,7 +73,6 @@ public final class ExportWizard extends Wizard implements IExportWizard {
     static final String PROPERTY_KEYSTORE = "keystore"; //$NON-NLS-1$
     static final String PROPERTY_ALIAS = "alias"; //$NON-NLS-1$
     static final String PROPERTY_DESTINATION = "destination"; //$NON-NLS-1$
-    static final String PROPERTY_FILENAME = "baseFilename"; //$NON-NLS-1$
 
     static final int APK_FILE_SOURCE = 0;
     static final int APK_FILE_DEST = 1;
@@ -96,6 +91,7 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         protected static final int DATA_KEY = 0x004;
 
         protected static final VerifyListener sPasswordVerifier = new VerifyListener() {
+            @Override
             public void verifyText(VerifyEvent e) {
                 // verify the characters are valid for password.
                 int len = e.text.length();
@@ -171,7 +167,7 @@ public final class ExportWizard extends Wizard implements IExportWizard {
     private PrivateKey mPrivateKey;
     private X509Certificate mCertificate;
 
-    private File mDestinationParentFolder;
+    private File mDestinationFile;
 
     private ExportWizardPage mKeystoreSelectionPage;
     private ExportWizardPage mKeyCreationPage;
@@ -181,8 +177,6 @@ public final class ExportWizard extends Wizard implements IExportWizard {
     private boolean mKeyCreationMode;
 
     private List<String> mExistingAliases;
-
-    private Map<String, String[]> mApkMap;
 
     public ExportWizard() {
         setHelpAvailable(false); // TODO have help
@@ -206,9 +200,7 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         ProjectHelper.saveStringProperty(mProject, PROPERTY_KEYSTORE, mKeystore);
         ProjectHelper.saveStringProperty(mProject, PROPERTY_ALIAS, mKeyAlias);
         ProjectHelper.saveStringProperty(mProject, PROPERTY_DESTINATION,
-                mDestinationParentFolder.getAbsolutePath());
-        ProjectHelper.saveStringProperty(mProject, PROPERTY_FILENAME,
-                mApkMap.get(null)[APK_FILE_DEST]);
+                mDestinationFile.getAbsolutePath());
 
         // run the export in an UI runnable.
         IWorkbench workbench = PlatformUI.getWorkbench();
@@ -220,6 +212,7 @@ public final class ExportWizard extends Wizard implements IExportWizard {
                  * @throws InvocationTargetException
                  * @throws InterruptedException
                  */
+                @Override
                 public void run(IProgressMonitor monitor) throws InvocationTargetException,
                         InterruptedException {
                     try {
@@ -240,9 +233,6 @@ public final class ExportWizard extends Wizard implements IExportWizard {
 
     private boolean doExport(IProgressMonitor monitor) {
         try {
-            // first we make sure the project is built
-            mProject.build(IncrementalProjectBuilder.INCREMENTAL_BUILD, monitor);
-
             // if needed, create the keystore and/or key.
             if (mKeystoreCreationMode || mKeyCreationMode) {
                 final ArrayList<String> output = new ArrayList<String>();
@@ -255,9 +245,11 @@ public final class ExportWizard extends Wizard implements IExportWizard {
                         mDName,
                         mValidity,
                         new IKeyGenOutput() {
+                            @Override
                             public void err(String message) {
                                 output.add(message);
                             }
+                            @Override
                             public void out(String message) {
                                 output.add(message);
                             }
@@ -280,6 +272,14 @@ public final class ExportWizard extends Wizard implements IExportWizard {
                 if (entry != null) {
                     mPrivateKey = entry.getPrivateKey();
                     mCertificate = (X509Certificate)entry.getCertificate();
+
+                    AdtPlugin.printToConsole(mProject,
+                            String.format("New keystore %s has been created.",
+                                    mDestinationFile.getAbsolutePath()),
+                            "Certificate fingerprints:",
+                            String.format("  MD5 : %s", getCertMd5Fingerprint()),
+                            String.format("  SHA1: %s", getCertSha1Fingerprint()));
+
                 } else {
                     // this really shouldn't happen since we now let the user choose the key
                     // from a list read from the store.
@@ -290,68 +290,29 @@ public final class ExportWizard extends Wizard implements IExportWizard {
 
             // check the private key/certificate again since it may have been created just above.
             if (mPrivateKey != null && mCertificate != null) {
-                // get the output folder of the project to export.
-                // this is where we'll find the built apks to resign and export.
-                IFolder outputIFolder = BaseProjectHelper.getOutputFolder(mProject);
-                if (outputIFolder == null) {
-                    return false;
-                }
-                String outputOsPath =  outputIFolder.getLocation().toOSString();
-
-                // now generate the packages.
-                Set<Entry<String, String[]>> set = mApkMap.entrySet();
-
                 boolean runZipAlign = false;
                 String path = AdtPlugin.getOsAbsoluteZipAlign();
                 File zipalign = new File(path);
                 runZipAlign = zipalign.isFile();
 
-                for (Entry<String, String[]> entry : set) {
-                    String[] defaultApk = entry.getValue();
-                    String srcFilename = defaultApk[APK_FILE_SOURCE];
-                    String destFilename = defaultApk[APK_FILE_DEST];
-                    File destFile;
-                    if (runZipAlign) {
-                        destFile = File.createTempFile("android", ".apk");
-                    } else {
-                        destFile = new File(mDestinationParentFolder, destFilename);
-                    }
-
-
-                    FileOutputStream fos = new FileOutputStream(destFile);
-                    SignedJarBuilder builder = new SignedJarBuilder(fos, mPrivateKey, mCertificate);
-
-                    // get the input file.
-                    FileInputStream fis = new FileInputStream(new File(outputOsPath, srcFilename));
-
-                    // add the content of the source file to the output file, and sign it at
-                    // the same time.
-                    try {
-                        builder.writeZip(fis, null /* filter */);
-                        // close the builder: write the final signature files,
-                        // and close the archive.
-                        builder.close();
-
-                        // now zipalign the result
-                        if (runZipAlign) {
-                            File realDestFile = new File(mDestinationParentFolder, destFilename);
-                            String message = zipAlign(path, destFile, realDestFile);
-                            if (message != null) {
-                                displayError(message);
-                                return false;
-                            }
-                        }
-                    } finally {
-                        try {
-                            fis.close();
-                        } finally {
-                            fos.close();
-                        }
-                    }
+                File apkExportFile = mDestinationFile;
+                if (runZipAlign) {
+                    // create a temp file for the original export.
+                    apkExportFile = File.createTempFile("androidExport_", ".apk");
                 }
 
-                // export success. In case we didn't run ZipAlign we display a warning
-                if (runZipAlign == false) {
+                // export the signed apk.
+                ExportHelper.exportReleaseApk(mProject, apkExportFile,
+                        mPrivateKey, mCertificate, monitor);
+
+                // align if we can
+                if (runZipAlign) {
+                    String message = zipAlign(path, apkExportFile, mDestinationFile);
+                    if (message != null) {
+                        displayError(message);
+                        return false;
+                    }
+                } else {
                     AdtPlugin.displayWarning("Export Wizard",
                             "The zipalign tool was not found in the SDK.\n\n" +
                             "Please update to the latest SDK and re-export your application\n" +
@@ -375,16 +336,17 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         // a private key/certificate or the creation mode. In creation mode, unless
         // all the key/keystore info is valid, the user cannot reach the last page, so there's
         // no need to check them again here.
-        return mApkMap != null && mApkMap.size() > 0 &&
-                ((mPrivateKey != null && mCertificate != null)
+        return ((mPrivateKey != null && mCertificate != null)
                         || mKeystoreCreationMode || mKeyCreationMode) &&
-                mDestinationParentFolder != null;
+                mDestinationFile != null;
     }
 
     /*
      * (non-Javadoc)
-     * @see org.eclipse.ui.IWorkbenchWizard#init(org.eclipse.ui.IWorkbench, org.eclipse.jface.viewers.IStructuredSelection)
+     * @see org.eclipse.ui.IWorkbenchWizard#init(org.eclipse.ui.IWorkbench,
+     * org.eclipse.jface.viewers.IStructuredSelection)
      */
+    @Override
     public void init(IWorkbench workbench, IStructuredSelection selection) {
         // get the project from the selection
         Object selected = selection.getFirstElement();
@@ -526,19 +488,25 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         return mDName;
     }
 
+    String getCertSha1Fingerprint() {
+        return FingerprintUtils.getFingerprint(mCertificate, "SHA1");
+    }
+
+    String getCertMd5Fingerprint() {
+        return FingerprintUtils.getFingerprint(mCertificate, "MD5");
+    }
+
     void setSigningInfo(PrivateKey privateKey, X509Certificate certificate) {
         mPrivateKey = privateKey;
         mCertificate = certificate;
     }
 
-    void setDestination(File parentFolder, Map<String, String[]> apkMap) {
-        mDestinationParentFolder = parentFolder;
-        mApkMap = apkMap;
+    void setDestination(File destinationFile) {
+        mDestinationFile = destinationFile;
     }
 
     void resetDestination() {
-        mDestinationParentFolder = null;
-        mApkMap = null;
+        mDestinationFile = null;
     }
 
     void updatePageOnChange(int changeMask) {
@@ -589,9 +557,31 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         command[4] = destination.getAbsolutePath();
 
         Process process = Runtime.getRuntime().exec(command);
-        ArrayList<String> output = new ArrayList<String>();
+        final ArrayList<String> output = new ArrayList<String>();
         try {
-            if (grabProcessOutput(process, output) != 0) {
+            final IProject project = getProject();
+
+            int status = GrabProcessOutput.grabProcessOutput(
+                    process,
+                    Wait.WAIT_FOR_READERS,
+                    new IProcessOutput() {
+                        @Override
+                        public void out(@Nullable String line) {
+                            if (line != null) {
+                                AdtPlugin.printBuildToConsole(BuildVerbosity.VERBOSE,
+                                        project, line);
+                            }
+                        }
+
+                        @Override
+                        public void err(@Nullable String line) {
+                            if (line != null) {
+                                output.add(line);
+                            }
+                        }
+                    });
+
+            if (status != 0) {
                 // build a single message from the array list
                 StringBuilder sb = new StringBuilder("Error while running zipalign:");
                 for (String msg : output) {
@@ -606,75 +596,6 @@ public final class ExportWizard extends Wizard implements IExportWizard {
         }
         return null;
     }
-
-    /**
-     * Get the stderr output of a process and return when the process is done.
-     * @param process The process to get the ouput from
-     * @param results The array to store the stderr output
-     * @return the process return code.
-     * @throws InterruptedException
-     */
-    private final int grabProcessOutput(final Process process,
-            final ArrayList<String> results)
-            throws InterruptedException {
-        // Due to the limited buffer size on windows for the standard io (stderr, stdout), we
-        // *need* to read both stdout and stderr all the time. If we don't and a process output
-        // a large amount, this could deadlock the process.
-
-        // read the lines as they come. if null is returned, it's
-        // because the process finished
-        new Thread("") { //$NON-NLS-1$
-            @Override
-            public void run() {
-                // create a buffer to read the stderr output
-                InputStreamReader is = new InputStreamReader(process.getErrorStream());
-                BufferedReader errReader = new BufferedReader(is);
-
-                try {
-                    while (true) {
-                        String line = errReader.readLine();
-                        if (line != null) {
-                            results.add(line);
-                        } else {
-                            break;
-                        }
-                    }
-                } catch (IOException e) {
-                    // do nothing.
-                }
-            }
-        }.start();
-
-        new Thread("") { //$NON-NLS-1$
-            @Override
-            public void run() {
-                InputStreamReader is = new InputStreamReader(process.getInputStream());
-                BufferedReader outReader = new BufferedReader(is);
-
-                IProject project = getProject();
-
-                try {
-                    while (true) {
-                        String line = outReader.readLine();
-                        if (line != null) {
-                            AdtPlugin.printBuildToConsole(BuildVerbosity.VERBOSE,
-                                    project, line);
-                        } else {
-                            break;
-                        }
-                    }
-                } catch (IOException e) {
-                    // do nothing.
-                }
-            }
-
-        }.start();
-
-        // get the return code from the process
-        return process.waitFor();
-    }
-
-
 
     /**
      * Returns the {@link Throwable#getMessage()}. If the {@link Throwable#getMessage()} returns

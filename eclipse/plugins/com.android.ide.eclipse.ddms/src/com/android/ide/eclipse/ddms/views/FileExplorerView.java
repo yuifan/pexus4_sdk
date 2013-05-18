@@ -23,6 +23,7 @@ import com.android.ddmuilib.explorer.DeviceExplorer;
 import com.android.ide.eclipse.ddms.CommonAction;
 import com.android.ide.eclipse.ddms.DdmsPlugin;
 import com.android.ide.eclipse.ddms.DdmsPlugin.ISelectionListener;
+import com.android.ide.eclipse.ddms.i18n.Messages;
 
 import org.eclipse.jface.action.IMenuManager;
 import org.eclipse.jface.action.IToolBarManager;
@@ -36,21 +37,20 @@ import org.eclipse.ui.part.ViewPart;
 
 public class FileExplorerView extends ViewPart implements ISelectionListener {
 
-    public static final String ID =
-        "com.android.ide.eclipse.ddms.views.FileExplorerView"; //$NON-NLS-1$
+    public static final String ID = "com.android.ide.eclipse.ddms.views.FileExplorerView"; //$NON-NLS-1$
 
     private final static String COLUMN_NAME =
-        DdmsPlugin.PLUGIN_ID + ".explorer.name"; //$NON-NLS-1S
-    private final static  String COLUMN_SIZE =
-        DdmsPlugin.PLUGIN_ID + ".explorer.size"; //$NON-NLS-1S
+            DdmsPlugin.PLUGIN_ID + ".explorer.name"; //$NON-NLS-1S
+    private final static String COLUMN_SIZE =
+            DdmsPlugin.PLUGIN_ID + ".explorer.size"; //$NON-NLS-1S
     private final static String COLUMN_DATE =
-        DdmsPlugin.PLUGIN_ID + ".explorer.data"; //$NON-NLS-1S
+            DdmsPlugin.PLUGIN_ID + ".explorer.data"; //$NON-NLS-1S
     private final static String COLUMN_TIME =
-        DdmsPlugin.PLUGIN_ID + ".explorer.time"; //$NON-NLS-1S
+            DdmsPlugin.PLUGIN_ID + ".explorer.time"; //$NON-NLS-1S
     private final static String COLUMN_PERMISSIONS =
-        DdmsPlugin.PLUGIN_ID +".explorer.permissions"; //$NON-NLS-1S
+            DdmsPlugin.PLUGIN_ID + ".explorer.permissions"; //$NON-NLS-1S
     private final static String COLUMN_INFO =
-        DdmsPlugin.PLUGIN_ID + ".explorer.info"; //$NON-NLS-1$
+            DdmsPlugin.PLUGIN_ID + ".explorer.info"; //$NON-NLS-1$
 
     private DeviceExplorer mExplorer;
 
@@ -71,47 +71,56 @@ public class FileExplorerView extends ViewPart implements ISelectionListener {
         // device explorer
         mExplorer = new DeviceExplorer();
 
-
         mExplorer.setCustomImages(
                 PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_OBJ_FILE),
                 PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_OBJ_FOLDER),
-                null /*apk image*/,
+                null /* apk image */,
                 PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_OBJ_ELEMENT)
-        );
+                );
 
         // creates the actions
-        CommonAction pushAction = new CommonAction("Push File...") {
+        CommonAction pushAction = new CommonAction(Messages.FileExplorerView_Push_File) {
             @Override
             public void run() {
                 mExplorer.pushIntoSelection();
             }
         };
-        pushAction.setToolTipText("Push a file onto the device");
+        pushAction.setToolTipText(Messages.FileExplorerView_Push_File_Onto_Device);
         pushAction.setImageDescriptor(loader.loadDescriptor("push.png")); //$NON-NLS-1$
         pushAction.setEnabled(false);
 
-        CommonAction pullAction = new CommonAction("Pull File...") {
+        CommonAction pullAction = new CommonAction(Messages.FileExplorerView_Pull_File) {
             @Override
             public void run() {
                 mExplorer.pullSelection();
             }
         };
-        pullAction.setToolTipText("Pull a file from the device");
+        pullAction.setToolTipText(Messages.FileExplorerView_Pull_File_From_File);
         pullAction.setImageDescriptor(loader.loadDescriptor("pull.png")); //$NON-NLS-1$
         pullAction.setEnabled(false);
 
-        CommonAction deleteAction = new CommonAction("Delete") {
+        CommonAction deleteAction = new CommonAction(Messages.FileExplorerView_Delete) {
             @Override
             public void run() {
                 mExplorer.deleteSelection();
             }
         };
-        deleteAction.setToolTipText("Delete the selection");
+        deleteAction.setToolTipText(Messages.FileExplorerView_Delete_The_Selection);
         deleteAction.setImageDescriptor(loader.loadDescriptor("delete.png")); //$NON-NLS-1$
         deleteAction.setEnabled(false);
 
+        CommonAction createNewFolderAction = new CommonAction("New Folder") {
+            @Override
+            public void run() {
+                mExplorer.createNewFolderInSelection();
+            }
+        };
+        createNewFolderAction.setToolTipText("New Folder");
+        createNewFolderAction.setImageDescriptor(loader.loadDescriptor("add.png")); //$NON-NLS-1$
+        createNewFolderAction.setEnabled(false);
+
         // set up the actions in the explorer
-        mExplorer.setActions(pushAction, pullAction, deleteAction);
+        mExplorer.setActions(pushAction, pullAction, deleteAction, createNewFolderAction);
 
         // and in the ui
         IActionBars actionBars = getViewSite().getActionBars();
@@ -122,11 +131,15 @@ public class FileExplorerView extends ViewPart implements ISelectionListener {
         menuManager.add(pushAction);
         menuManager.add(new Separator());
         menuManager.add(deleteAction);
+        menuManager.add(new Separator());
+        menuManager.add(createNewFolderAction);
 
         toolBarManager.add(pullAction);
         toolBarManager.add(pushAction);
         toolBarManager.add(new Separator());
         toolBarManager.add(deleteAction);
+        toolBarManager.add(new Separator());
+        toolBarManager.add(createNewFolderAction);
 
         mExplorer.createPanel(parent);
 
@@ -140,16 +153,20 @@ public class FileExplorerView extends ViewPart implements ISelectionListener {
 
     /**
      * Sent when a new {@link Client} is selected.
+     *
      * @param selectedClient The selected client.
      */
+    @Override
     public void selectionChanged(Client selectedClient) {
         // pass
     }
 
     /**
      * Sent when a new {@link Device} is selected.
+     *
      * @param selectedDevice the selected device.
      */
+    @Override
     public void selectionChanged(IDevice selectedDevice) {
         mExplorer.switchDevice(selectedDevice);
     }

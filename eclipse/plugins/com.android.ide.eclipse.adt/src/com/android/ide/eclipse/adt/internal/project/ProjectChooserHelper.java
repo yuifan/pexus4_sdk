@@ -29,6 +29,11 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.ui.JavaElementLabelProvider;
 import org.eclipse.jface.viewers.ILabelProvider;
 import org.eclipse.jface.window.Window;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.SelectionListener;
+import org.eclipse.swt.widgets.Combo;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.dialogs.ElementListSelectionDialog;
 
@@ -64,6 +69,7 @@ public class ProjectChooserHelper {
      * An implementation of {@link IProjectChooserFilter} that only displays non-library projects.
      */
     public final static class NonLibraryProjectOnlyFilter implements IProjectChooserFilter {
+        @Override
         public boolean accept(IProject project) {
             ProjectState state = Sdk.getProjectState(project);
             if (state != null) {
@@ -73,6 +79,7 @@ public class ProjectChooserHelper {
             return false;
         }
 
+        @Override
         public boolean useCache() {
             return true;
         }
@@ -82,6 +89,7 @@ public class ProjectChooserHelper {
      * An implementation of {@link IProjectChooserFilter} that only displays library projects.
      */
     public final static class LibraryProjectOnlyFilter implements IProjectChooserFilter {
+        @Override
         public boolean accept(IProject project) {
             ProjectState state = Sdk.getProjectState(project);
             if (state != null ) {
@@ -91,6 +99,7 @@ public class ProjectChooserHelper {
             return false;
         }
 
+        @Override
         public boolean useCache() {
             return true;
         }
@@ -193,5 +202,103 @@ public class ProjectChooserHelper {
             }
         }
         return iproject;
+    }
+
+    /**
+     * A selector combo for showing the currently selected project and for
+     * changing the selection
+     */
+    public static class ProjectCombo extends Combo implements SelectionListener {
+        /** Currently chosen project, or null when no project has been initialized or selected */
+        private IProject mProject;
+        private IJavaProject[] mAvailableProjects;
+
+        /**
+         * Creates a new project selector combo
+         *
+         * @param helper associated {@link ProjectChooserHelper} for looking up
+         *            projects
+         * @param parent parent composite to add the combo to
+         * @param initialProject the initial project to select, or null (which
+         *            will show a "Please Choose Project..." label instead.)
+         */
+        public ProjectCombo(ProjectChooserHelper helper, Composite parent,
+                IProject initialProject) {
+            super(parent, SWT.BORDER | SWT.FLAT | SWT.READ_ONLY);
+            mProject = initialProject;
+
+            mAvailableProjects = helper.getAndroidProjects(null);
+            String[] items = new String[mAvailableProjects.length + 1];
+            items[0] = "--- Choose Project ---";
+
+            ILabelProvider labelProvider = new JavaElementLabelProvider(
+                    JavaElementLabelProvider.SHOW_DEFAULT);
+            int selectionIndex = 0;
+            for (int i = 0, n = mAvailableProjects.length; i < n; i++) {
+                IProject project = mAvailableProjects[i].getProject();
+                items[i + 1] = labelProvider.getText(project);
+                if (project == initialProject) {
+                    selectionIndex = i + 1;
+                }
+            }
+            setItems(items);
+            select(selectionIndex);
+
+            addSelectionListener(this);
+        }
+
+        /**
+         * Returns the project selected by this chooser (or the initial project
+         * passed to the constructor if the user did not change it)
+         *
+         * @return the selected project
+         */
+        public IProject getSelectedProject() {
+            return mProject;
+        }
+
+        /**
+         * Sets the project selected by this chooser
+         *
+         * @param project the selected project
+         */
+        public void setSelectedProject(IProject project) {
+            mProject = project;
+
+            int selectionIndex = 0;
+            for (int i = 0, n = mAvailableProjects.length; i < n; i++) {
+                if (project == mAvailableProjects[i].getProject()) {
+                    selectionIndex = i + 1; // +1: Slot 0 is reserved for "Choose Project"
+                    select(selectionIndex);
+                    break;
+                }
+            }
+        }
+
+        /**
+         * Click handler for the button: Open the {@link ProjectChooserHelper}
+         * dialog for selecting a new project.
+         */
+        @Override
+        public void widgetSelected(SelectionEvent e) {
+            int selectionIndex = getSelectionIndex();
+            if (selectionIndex > 0 && mAvailableProjects != null
+                    && selectionIndex <= mAvailableProjects.length) {
+                // selection index 0 is "Choose Project", all other projects are offset
+                // by 1 from the selection index
+                mProject = mAvailableProjects[selectionIndex - 1].getProject();
+            } else {
+                mProject = null;
+            }
+        }
+
+        @Override
+        public void widgetDefaultSelected(SelectionEvent e) {
+        }
+
+        @Override
+        protected void checkSubclass() {
+            // Disable the check that prevents subclassing of SWT components
+        }
     }
 }

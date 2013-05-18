@@ -16,12 +16,12 @@
 
 package com.android.ide.eclipse.adt.internal.sdk;
 
+import com.android.SdkConstants;
+import com.android.ide.common.resources.platform.AttrsXmlParser;
+import com.android.ide.common.resources.platform.ViewClassInfo;
+import com.android.ide.common.resources.platform.ViewClassInfo.LayoutParamsInfo;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.internal.resources.AttrsXmlParser;
-import com.android.ide.eclipse.adt.internal.resources.ViewClassInfo;
-import com.android.ide.eclipse.adt.internal.resources.ViewClassInfo.LayoutParamsInfo;
 import com.android.ide.eclipse.adt.internal.sdk.IAndroidClassLoader.IClassDescriptor;
-import com.android.sdklib.SdkConstants;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.SubMonitor;
@@ -262,7 +262,7 @@ public class LayoutParamsParser {
         IClassDescriptor superClass = groupClass.getSuperclass();
 
         // Assertion: at this point, we should have
-        //   superClass != mTopViewClass || fqcn.equals(AndroidConstants.CLASS_VIEWGROUP);
+        //   superClass != mTopViewClass || fqcn.equals(SdkConstants.CLASS_VIEWGROUP);
 
         if (superClass != null && superClass.equals(mTopViewClass) == false) {
             ExtViewClassInfo superClassInfo = addGroup(superClass);

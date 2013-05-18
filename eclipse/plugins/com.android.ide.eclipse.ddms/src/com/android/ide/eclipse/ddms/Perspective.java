@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.android.ide.eclipse.ddms;
 
 import com.android.ide.eclipse.ddms.views.AllocTrackerView;
@@ -21,6 +22,8 @@ import com.android.ide.eclipse.ddms.views.EmulatorControlView;
 import com.android.ide.eclipse.ddms.views.FileExplorerView;
 import com.android.ide.eclipse.ddms.views.HeapView;
 import com.android.ide.eclipse.ddms.views.LogCatView;
+import com.android.ide.eclipse.ddms.views.NetworkStatisticsView;
+import com.android.ide.eclipse.ddms.views.SysInfoView;
 import com.android.ide.eclipse.ddms.views.ThreadView;
 
 import org.eclipse.ui.IFolderLayout;
@@ -29,6 +32,9 @@ import org.eclipse.ui.IPerspectiveFactory;
 
 public class Perspective implements IPerspectiveFactory {
 
+    public static String ID = "com.android.ide.eclipse.ddms.Perspective"; //$NON-NLS-1$
+
+    @Override
     public void createInitialLayout(IPageLayout layout) {
         // create a default layout that looks like the stand alone DDMS.
 
@@ -48,18 +54,16 @@ public class Perspective implements IPerspectiveFactory {
         folder.addPlaceholder(DeviceView.ID + ":*"); //$NON-NLS-1$
         folder.addView(DeviceView.ID);
 
-        folder = layout.createFolder("emulator", IPageLayout.BOTTOM, 0.5f, //$NON-NLS-1$
-                "devices");
-        folder.addPlaceholder(EmulatorControlView.ID + ":*"); //$NON-NLS-1$
-        folder.addView(EmulatorControlView.ID);
-
         folder = layout.createFolder("ddms-detail", IPageLayout.RIGHT, 0.5f, //$NON-NLS-1$
                 editorArea);
         folder.addPlaceholder(ThreadView.ID + ":*"); //$NON-NLS-1$
         folder.addView(ThreadView.ID);
         folder.addView(HeapView.ID);
         folder.addView(AllocTrackerView.ID);
+        folder.addView(NetworkStatisticsView.ID);
         folder.addView(FileExplorerView.ID);
+        folder.addView(EmulatorControlView.ID);
+        folder.addView(SysInfoView.ID);
 
         layout.addPerspectiveShortcut("org.eclipse.ui.resourcePerspective"); //$NON-NLS-1$
         layout.addPerspectiveShortcut("org.eclipse.debug.ui.DebugPerspective"); //$NON-NLS-1$
@@ -71,6 +75,8 @@ public class Perspective implements IPerspectiveFactory {
         layout.addShowViewShortcut(AllocTrackerView.ID);
         layout.addShowViewShortcut(LogCatView.ID);
         layout.addShowViewShortcut(ThreadView.ID);
+        layout.addShowViewShortcut(NetworkStatisticsView.ID);
+        layout.addShowViewShortcut(SysInfoView.ID);
 
         layout.addShowViewShortcut(IPageLayout.ID_RES_NAV);
         layout.addShowViewShortcut(IPageLayout.ID_BOOKMARKS);

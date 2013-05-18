@@ -16,13 +16,16 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout.gre;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.INode;
+import com.android.ide.common.api.INode;
 import com.android.ide.eclipse.adt.internal.editors.layout.gle2.CanvasViewInfo;
+import com.android.ide.eclipse.adt.internal.editors.layout.gle2.LayoutCanvas;
+import com.android.ide.eclipse.adt.internal.editors.layout.gle2.SwtUtils;
 import com.android.ide.eclipse.adt.internal.editors.layout.uimodel.UiViewElementNode;
 
 import org.eclipse.swt.graphics.Rectangle;
 
-import java.util.HashMap;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * An object that can create {@link INode} proxies.
@@ -30,10 +33,12 @@ import java.util.HashMap;
  */
 public class NodeFactory {
 
-    private final HashMap<UiViewElementNode, NodeProxy> mNodeMap =
-        new HashMap<UiViewElementNode, NodeProxy>();
+    private final Map<UiViewElementNode, NodeProxy> mNodeMap =
+        new WeakHashMap<UiViewElementNode, NodeProxy>();
+    private LayoutCanvas mCanvas;
 
-    public NodeFactory() {
+    public NodeFactory(LayoutCanvas canvas) {
+        mCanvas = canvas;
     }
 
     /**
@@ -41,12 +46,13 @@ public class NodeFactory {
      * {@link CanvasViewInfo}. The bounds of the node are set to the canvas view bounds.
      */
     public NodeProxy create(CanvasViewInfo canvasViewInfo) {
-        return create(canvasViewInfo.getUiViewKey(), canvasViewInfo.getAbsRect());
+        return create(canvasViewInfo.getUiViewNode(), canvasViewInfo.getAbsRect());
     }
 
     /**
      * Returns an {@link INode} proxy based on a given {@link UiViewElementNode} that
-     * is not yet part of the canvas, typically those created
+     * is not yet part of the canvas, typically those created by layout rules
+     * when generating new XML.
      */
     public NodeProxy create(UiViewElementNode uiNode) {
         return create(uiNode, null /*bounds*/);
@@ -54,6 +60,10 @@ public class NodeFactory {
 
     public void clear() {
         mNodeMap.clear();
+    }
+
+    public LayoutCanvas getCanvas() {
+        return mCanvas;
     }
 
     //----
@@ -66,7 +76,7 @@ public class NodeFactory {
             proxy = new NodeProxy(uiNode, bounds, this);
             mNodeMap.put(uiNode, proxy);
 
-        } else if (bounds != null && !proxy.getBounds().equals(bounds)) {
+        } else if (bounds != null && !SwtUtils.equals(proxy.getBounds(), bounds)) {
             // Update the bounds if necessary
             proxy.setBounds(bounds);
         }

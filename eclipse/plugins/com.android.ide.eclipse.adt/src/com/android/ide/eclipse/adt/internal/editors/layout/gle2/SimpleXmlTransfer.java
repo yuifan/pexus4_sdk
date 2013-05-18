@@ -20,7 +20,6 @@ import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescripto
 import com.android.ide.eclipse.adt.internal.editors.layout.descriptors.ViewElementDescriptor;
 
 import org.eclipse.swt.dnd.ByteArrayTransfer;
-import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.dnd.TransferData;
 
 import java.io.UnsupportedEncodingException;
@@ -59,7 +58,7 @@ import java.io.UnsupportedEncodingException;
  * {@link SimpleAttribute}s, all of which have very specific properties that are
  * specifically limited to our needs for drag'n'drop.
  */
-class SimpleXmlTransfer extends ByteArrayTransfer {
+final class SimpleXmlTransfer extends ByteArrayTransfer {
 
     // Reference: http://www.eclipse.org/articles/Article-SWT-DND/DND-in-SWT.html
 

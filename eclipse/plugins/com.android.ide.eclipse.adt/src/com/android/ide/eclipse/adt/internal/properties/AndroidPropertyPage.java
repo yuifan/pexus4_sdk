@@ -16,11 +16,11 @@
 
 package com.android.ide.eclipse.adt.internal.properties;
 
+import com.android.SdkConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.SdkConstants;
 import com.android.sdklib.internal.project.ProjectProperties;
 import com.android.sdklib.internal.project.ProjectPropertiesWorkingCopy;
 import com.android.sdkuilib.internal.widgets.SdkTargetSelector;
@@ -37,7 +37,6 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Group;
-import org.eclipse.ui.IWorkbenchPropertyPage;
 import org.eclipse.ui.dialogs.PropertyPage;
 
 /**
@@ -46,7 +45,7 @@ import org.eclipse.ui.dialogs.PropertyPage;
  * "Properties".
  *
  */
-public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPropertyPage {
+public class AndroidPropertyPage extends PropertyPage {
 
     private IProject mProject;
     private SdkTargetSelector mSelector;
@@ -93,17 +92,6 @@ public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPrope
 
         mLibraryDependencies = new LibraryProperties(libraryGroup);
 
-        /*
-         * APK-SPLIT: This is not yet supported, so we hide the UI
-        Group g = new Group(top, SWT.NONE);
-        g.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-        g.setLayout(new GridLayout(1, false));
-        g.setText("APK Generation");
-
-        mSplitByDensity = new Button(g, SWT.CHECK);
-        mSplitByDensity.setText("One APK per density");
-
-*/
         // fill the ui
         fillUi();
 
@@ -134,13 +122,13 @@ public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPrope
             boolean mustSaveProp = false;
 
             IAndroidTarget newTarget = mSelector.getSelected();
-            if (newTarget != state.getTarget()) {
+            if (state == null || newTarget != state.getTarget()) {
                 mPropertiesWorkingCopy.setProperty(ProjectProperties.PROPERTY_TARGET,
                         newTarget.hashString());
                 mustSaveProp = true;
             }
 
-            if (mIsLibrary.getSelection() != state.isLibrary()) {
+            if (state == null || mIsLibrary.getSelection() != state.isLibrary()) {
                 mPropertiesWorkingCopy.setProperty(ProjectProperties.PROPERTY_LIBRARY,
                         Boolean.toString(mIsLibrary.getSelection()));
                 mustSaveProp = true;
@@ -150,18 +138,18 @@ public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPrope
                 mustSaveProp = true;
             }
 
-            // TODO: update ApkSettings.
-
             if (mustSaveProp) {
                 try {
                     mPropertiesWorkingCopy.save();
 
-                    IResource defaultProp = mProject.findMember(SdkConstants.FN_DEFAULT_PROPERTIES);
-                    defaultProp.refreshLocal(IResource.DEPTH_ZERO, new NullProgressMonitor());
+                    IResource projectProp = mProject.findMember(SdkConstants.FN_PROJECT_PROPERTIES);
+                    if (projectProp != null) {
+                        projectProp.refreshLocal(IResource.DEPTH_ZERO, new NullProgressMonitor());
+                    }
                 } catch (Exception e) {
                     String msg = String.format(
                             "Failed to save %1$s for project %2$s",
-                            SdkConstants.FN_DEFAULT_PROPERTIES, mProject.getName());
+                            SdkConstants.FN_PROJECT_PROPERTIES, mProject.getName());
                     AdtPlugin.log(e, msg);
                 }
             }
@@ -184,20 +172,13 @@ public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPrope
             mPropertiesWorkingCopy = state.getProperties().makeWorkingCopy();
 
             // get the target
-            IAndroidTarget target = state.getTarget();;
+            IAndroidTarget target = state.getTarget();
             if (target != null) {
                 mSelector.setSelection(target);
             }
 
             mIsLibrary.setSelection(state.isLibrary());
             mLibraryDependencies.setContent(state, mPropertiesWorkingCopy);
-
-            /*
-             * APK-SPLIT: This is not yet supported, so we hide the UI
-            // get the project settings
-            ApkSettings settings = currentSdk.getApkSettings(mProject);
-            mSplitByDensity.setSelection(settings.isSplitByDpi());
-            */
         }
 
     }
@@ -207,5 +188,4 @@ public class AndroidPropertyPage extends PropertyPage implements IWorkbenchPrope
         IAndroidTarget target = mSelector.getSelected();
         setValid(target != null);
     }
-
 }

@@ -16,6 +16,8 @@
 
 package com.android.ide.eclipse.adt.internal.editors.uimodel;
 
+import com.android.ide.common.xml.XmlAttributeSortOrder;
+import com.android.ide.eclipse.adt.internal.editors.AndroidXmlEditor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 
 import org.eclipse.swt.widgets.Composite;
@@ -31,15 +33,15 @@ import org.w3c.dom.Node;
  * This is an abstract class. Derived classes must implement the creation of the UI
  * and manage its synchronization with the XML.
  */
-public abstract class UiAttributeNode {
+public abstract class UiAttributeNode implements Comparable<UiAttributeNode> {
 
     private AttributeDescriptor mDescriptor;
     private UiElementNode mUiParent;
     private boolean mIsDirty;
     private boolean mHasError;
 
-    /** Creates a new {@link UiAttributeNode} linked to a specific {@link AttributeDescriptor} 
-     * and the corresponding runtine {@link UiElementNode} parent. */
+    /** Creates a new {@link UiAttributeNode} linked to a specific {@link AttributeDescriptor}
+     * and the corresponding runtime {@link UiElementNode} parent. */
     public UiAttributeNode(AttributeDescriptor attributeDescriptor, UiElementNode uiParent) {
         mDescriptor = attributeDescriptor;
         mUiParent = uiParent;
@@ -54,7 +56,7 @@ public abstract class UiAttributeNode {
     public final UiElementNode getUiParent() {
         return mUiParent;
     }
-    
+
     /** Returns the current value of the node. */
     public abstract String getCurrentValue();
 
@@ -72,16 +74,21 @@ public abstract class UiAttributeNode {
      * <p/>
      * Subclasses should set the to true as a result of user interaction with the widgets in
      * the section and then should set to false when the commit() method completed.
+     *
+     * @param isDirty the new value to set the dirty-flag to
      */
     public void setDirty(boolean isDirty) {
-        boolean old_value = mIsDirty;
+        boolean wasDirty = mIsDirty;
         mIsDirty = isDirty;
         // TODO: for unknown attributes, getParent() != null && getParent().getEditor() != null
-        if (old_value != isDirty) {
-            getUiParent().getEditor().editorDirtyStateChanged();
+        if (wasDirty != isDirty) {
+            AndroidXmlEditor editor = getUiParent().getEditor();
+            if (editor != null) {
+                editor.editorDirtyStateChanged();
+            }
         }
     }
-    
+
     /**
      * Sets the error flag value.
      * @param errorFlag the error flag
@@ -89,21 +96,21 @@ public abstract class UiAttributeNode {
     public final void setHasError(boolean errorFlag) {
         mHasError = errorFlag;
     }
-    
+
     /**
      * Returns whether this node has errors.
      */
     public final boolean hasError() {
         return mHasError;
     }
-    
+
     /**
      * Called once by the parent user interface to creates the necessary
      * user interface to edit this attribute.
      * <p/>
      * This method can be called more than once in the life cycle of an UI node,
      * typically when the UI is part of a master-detail tree, as pages are swapped.
-     * 
+     *
      * @param parent The composite where to create the user interface.
      * @param managedForm The managed form owning this part.
      */
@@ -116,7 +123,7 @@ public abstract class UiAttributeNode {
      * for an attribute.
      * <p/>
      * Implementations that do not have any known values should return null.
-     * 
+     *
      * @param prefix An optional prefix string, which is whatever the user has already started
      *   typing. Can be null or an empty string. The implementation can use this to filter choices
      *   and only return strings that match this prefix. A lazy or default implementation can
@@ -136,10 +143,10 @@ public abstract class UiAttributeNode {
      * The caller doesn't really know if attributes have changed,
      * so it will call this to refresh the attribute anyway. It's up to the
      * UI implementation to minimize refreshes.
-     * 
-     * @param xml_attribute_node
+     *
+     * @param node the node to read the value from
      */
-    public abstract void updateValue(Node xml_attribute_node);
+    public abstract void updateValue(Node node);
 
     /**
      * Called by the user interface when the editor is saved or its state changed
@@ -156,4 +163,12 @@ public abstract class UiAttributeNode {
      * </ul>
      */
     public abstract void commit();
+
+    // ---- Implements Comparable ----
+
+    @Override
+    public int compareTo(UiAttributeNode o) {
+        return XmlAttributeSortOrder.compareAttributes(mDescriptor.getXmlLocalName(),
+                o.mDescriptor.getXmlLocalName());
+    }
 }

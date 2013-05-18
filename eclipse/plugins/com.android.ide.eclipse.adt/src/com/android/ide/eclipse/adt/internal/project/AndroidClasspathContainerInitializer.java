@@ -16,50 +16,68 @@
 
 package com.android.ide.eclipse.adt.internal.project;
 
+import com.android.SdkConstants;
+import com.android.ide.common.sdk.LoadStatus;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
-import com.android.ide.eclipse.adt.internal.sdk.LoadStatus;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
+import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.SdkConstants;
 import com.android.sdklib.IAndroidTarget.IOptionalLibrary;
+import com.google.common.collect.Maps;
+import com.google.common.io.Closeables;
 
-import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.IWorkspaceRoot;
+import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.FileLocator;
 import org.eclipse.core.runtime.IPath;
-import org.eclipse.core.runtime.IProgressMonitor;
-import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
-import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.jobs.Job;
-import org.eclipse.jdt.core.ClasspathContainerInitializer;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.jdt.core.IAccessRule;
 import org.eclipse.jdt.core.IClasspathAttribute;
 import org.eclipse.jdt.core.IClasspathContainer;
 import org.eclipse.jdt.core.IClasspathEntry;
+import org.eclipse.jdt.core.IJavaModel;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
+import org.osgi.framework.Bundle;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
  * Classpath container initializer responsible for binding {@link AndroidClasspathContainer} to
  * {@link IProject}s. This removes the hard-coded path to the android.jar.
  */
-public class AndroidClasspathContainerInitializer extends ClasspathContainerInitializer {
-    /** The container id for the android framework jar file */
-    private final static String CONTAINER_ID =
-        "com.android.ide.eclipse.adt.ANDROID_FRAMEWORK"; //$NON-NLS-1$
+public class AndroidClasspathContainerInitializer extends BaseClasspathContainerInitializer {
+
+    public static final String NULL_API_URL = "<null>"; //$NON-NLS-1$
+
+    public static final String SOURCES_ZIP = "/sources.zip"; //$NON-NLS-1$
+
+    public static final String COM_ANDROID_IDE_ECLIPSE_ADT_SOURCE =
+        "com.android.ide.eclipse.source"; //$NON-NLS-1$
+
+    private static final String ANDROID_API_REFERENCE =
+        "http://developer.android.com/reference/"; //$NON-NLS-1$
+
+    private final static String PROPERTY_ANDROID_API = "androidApi"; //$NON-NLS-1$
+
+    private final static String PROPERTY_ANDROID_SOURCE = "androidSource"; //$NON-NLS-1$
 
     /** path separator to store multiple paths in a single property. This is guaranteed to not
      * be in a path.
@@ -89,29 +107,15 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
      */
     @Override
     public void initialize(IPath containerPath, IJavaProject project) throws CoreException {
-        if (CONTAINER_ID.equals(containerPath.toString())) {
-            JavaCore.setClasspathContainer(new Path(CONTAINER_ID),
-                    new IJavaProject[] { project },
-                    new IClasspathContainer[] { allocateAndroidContainer(project) },
-                    new NullProgressMonitor());
+        if (AdtConstants.CONTAINER_FRAMEWORK.equals(containerPath.toString())) {
+            IClasspathContainer container = allocateAndroidContainer(project);
+            if (container != null) {
+                JavaCore.setClasspathContainer(new Path(AdtConstants.CONTAINER_FRAMEWORK),
+                        new IJavaProject[] { project },
+                        new IClasspathContainer[] { container },
+                        new NullProgressMonitor());
+            }
         }
-    }
-
-    /**
-     * Creates a new {@link IClasspathEntry} of type {@link IClasspathEntry#CPE_CONTAINER}
-     * linking to the Android Framework.
-     */
-    public static IClasspathEntry getContainerEntry() {
-        return JavaCore.newContainerEntry(new Path(CONTAINER_ID));
-    }
-
-    /**
-     * Checks the {@link IPath} objects against the android framework container id and
-     * returns <code>true</code> if they are identical.
-     * @param path the <code>IPath</code> to check.
-     */
-    public static boolean checkPath(IPath path) {
-        return CONTAINER_ID.equals(path.toString());
     }
 
     /**
@@ -120,7 +124,7 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
      * @param androidProjects the projects to update.
      * @return <code>true</code> if success, <code>false</code> otherwise.
      */
-    public static boolean updateProjects(IJavaProject[] androidProjects) {
+    static boolean updateProjects(IJavaProject[] androidProjects) {
         try {
             // Allocate a new AndroidClasspathContainer, and associate it to the android framework
             // container id for each projects.
@@ -137,7 +141,7 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
 
             // give each project their new container in one call.
             JavaCore.setClasspathContainer(
-                    new Path(CONTAINER_ID),
+                    new Path(AdtConstants.CONTAINER_FRAMEWORK),
                     androidProjects, containers, new NullProgressMonitor());
 
             return true;
@@ -156,9 +160,13 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
 
         String markerMessage = null;
         boolean outputToConsole = true;
+        IAndroidTarget target = null;
 
         try {
             AdtPlugin plugin = AdtPlugin.getDefault();
+            if (plugin == null) { // This is totally weird, but I've seen it happen!
+                return null;
+            }
 
             synchronized (Sdk.getLock()) {
                 boolean sdkIsLoaded = plugin.getSdkLoadStatus() == LoadStatus.LOADED;
@@ -166,12 +174,13 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
                 // check if the project has a valid target.
                 ProjectState state = Sdk.getProjectState(iProject);
                 if (state == null) {
-                    // looks like the project state (default.properties) couldn't be read!
+                    // looks like the project state (project.properties) couldn't be read!
                     markerMessage = String.format(
-                            "Project has no default.properties file! Edit the project properties to set one.");
+                            "Project has no %1$s file! Edit the project properties to set one.",
+                            SdkConstants.FN_PROJECT_PROPERTIES);
                 } else {
                     // this might be null if the sdk is not yet loaded.
-                    IAndroidTarget target = state.getTarget();
+                    target = state.getTarget();
 
                     // if we are loaded and the target is non null, we create a valid
                     // ClassPathContainer
@@ -179,21 +188,13 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
                         // first make sure the target has loaded its data
                         Sdk.getCurrent().checkAndLoadTargetData(target, null /*project*/);
 
-                        // now do a quick check to make sure the project's target is compatible
-                        // with library (if applicable).
-                        if (state.hasLibraries() &&
-                                target.getProperty(
-                                        SdkConstants.PROP_SDK_SUPPORT_LIBRARY, false) == false) {
-                            AdtPlugin.printErrorToConsole(iProject, String.format(
-                                    "Target '%1$s' does not support building project with libraries.",
-                                    target.getFullName()));
-                        }
-
                         String targetName = target.getClasspathName();
 
                         return new AndroidClasspathContainer(
                                 createClasspathEntries(iProject, target, targetName),
-                                new Path(CONTAINER_ID), targetName);
+                                new Path(AdtConstants.CONTAINER_FRAMEWORK),
+                                targetName,
+                                IClasspathContainer.K_DEFAULT_SYSTEM);
                     }
 
                     // In case of error, we'll try different thing to provide the best error message
@@ -218,7 +219,8 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
                         // this is the case where there is a hashString but the SDK is not yet
                         // loaded and therefore we can't get the target yet.
                         // We check if there is a cache of the needed information.
-                        AndroidClasspathContainer container = getContainerFromCache(iProject);
+                        AndroidClasspathContainer container = getContainerFromCache(iProject,
+                                target);
 
                         if (container == null) {
                             // either the cache was wrong (ie folder does not exists anymore), or
@@ -249,87 +251,29 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
                 // It'll be replaced by the real when if/when the target is resolved if/when the
                 // SDK finishes loading.
                 return new IClasspathContainer() {
+                    @Override
                     public IClasspathEntry[] getClasspathEntries() {
                         return new IClasspathEntry[0];
                     }
 
+                    @Override
                     public String getDescription() {
                         return "Unable to get system library for the project";
                     }
 
+                    @Override
                     public int getKind() {
                         return IClasspathContainer.K_DEFAULT_SYSTEM;
                     }
 
+                    @Override
                     public IPath getPath() {
                         return null;
                     }
                 };
             }
         } finally {
-            if (markerMessage != null) {
-                // log the error and put the marker on the project if we can.
-                if (outputToConsole) {
-                    AdtPlugin.printErrorToConsole(iProject, markerMessage);
-                }
-
-                try {
-                    BaseProjectHelper.markProject(iProject, AndroidConstants.MARKER_TARGET,
-                            markerMessage, IMarker.SEVERITY_ERROR, IMarker.PRIORITY_HIGH);
-                } catch (CoreException e) {
-                    // In some cases, the workspace may be locked for modification when we
-                    // pass here.
-                    // We schedule a new job to put the marker after.
-                    final String fmessage = markerMessage;
-                    Job markerJob = new Job("Android SDK: Resolving error markers") {
-                        @Override
-                        protected IStatus run(IProgressMonitor monitor) {
-                            try {
-                                BaseProjectHelper.markProject(iProject,
-                                        AndroidConstants.MARKER_TARGET,
-                                        fmessage, IMarker.SEVERITY_ERROR,
-                                        IMarker.PRIORITY_HIGH);
-                            } catch (CoreException e2) {
-                                return e2.getStatus();
-                            }
-
-                            return Status.OK_STATUS;
-                        }
-                    };
-
-                    // build jobs are run after other interactive jobs
-                    markerJob.setPriority(Job.BUILD);
-                    markerJob.schedule();
-                }
-            } else {
-                // no error, remove potential MARKER_TARGETs.
-                try {
-                    if (iProject.exists()) {
-                        iProject.deleteMarkers(AndroidConstants.MARKER_TARGET, true,
-                                IResource.DEPTH_INFINITE);
-                    }
-                } catch (CoreException ce) {
-                    // In some cases, the workspace may be locked for modification when we pass
-                    // here, so we schedule a new job to put the marker after.
-                    Job markerJob = new Job("Android SDK: Resolving error markers") {
-                        @Override
-                        protected IStatus run(IProgressMonitor monitor) {
-                            try {
-                                iProject.deleteMarkers(AndroidConstants.MARKER_TARGET, true,
-                                        IResource.DEPTH_INFINITE);
-                            } catch (CoreException e2) {
-                                return e2.getStatus();
-                            }
-
-                            return Status.OK_STATUS;
-                        }
-                    };
-
-                    // build jobs are run after other interactive jobs
-                    markerJob.setPriority(Job.BUILD);
-                    markerJob.schedule();
-                }
-            }
+           processError(iProject, markerMessage, AdtConstants.MARKER_TARGET, outputToConsole);
         }
     }
 
@@ -354,7 +298,7 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
         String[] paths = getTargetPaths(target);
 
         // create the classpath entry from the paths
-        IClasspathEntry[] entries = createClasspathEntriesFromPaths(paths);
+        IClasspathEntry[] entries = createClasspathEntriesFromPaths(paths, target);
 
         // paths now contains all the path required to recreate the IClasspathEntry with no
         // target info. We encode them in a single string, with each path separated by
@@ -375,7 +319,8 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
     /**
      * Generates an {@link AndroidClasspathContainer} from the project cache, if possible.
      */
-    private static AndroidClasspathContainer getContainerFromCache(IProject project) {
+    private static AndroidClasspathContainer getContainerFromCache(IProject project,
+            IAndroidTarget target) {
         // get the cached info from the project persistent properties.
         String cache = ProjectHelper.loadStringProperty(project, PROPERTY_CONTAINER_CACHE);
         String targetNameCache = ProjectHelper.loadStringProperty(project, PROPERTY_TARGET_NAME);
@@ -434,40 +379,99 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
             return null;
         }
 
-        IClasspathEntry[] entries = createClasspathEntriesFromPaths(paths);
+        IClasspathEntry[] entries = createClasspathEntriesFromPaths(paths, target);
 
         return new AndroidClasspathContainer(entries,
-                new Path(CONTAINER_ID), targetNameCache);
+                new Path(AdtConstants.CONTAINER_FRAMEWORK),
+                targetNameCache, IClasspathContainer.K_DEFAULT_SYSTEM);
     }
 
     /**
      * Generates an array of {@link IClasspathEntry} from a set of paths.
      * @see #getTargetPaths(IAndroidTarget)
      */
-    private static IClasspathEntry[] createClasspathEntriesFromPaths(String[] paths) {
+    private static IClasspathEntry[] createClasspathEntriesFromPaths(String[] paths,
+            IAndroidTarget target) {
         ArrayList<IClasspathEntry> list = new ArrayList<IClasspathEntry>();
 
         // First, we create the IClasspathEntry for the framework.
         // now add the android framework to the class path.
         // create the path object.
-        IPath android_lib = new Path(paths[CACHE_INDEX_JAR]);
-        IPath android_src = new Path(paths[CACHE_INDEX_SRC]);
+        IPath androidLib = new Path(paths[CACHE_INDEX_JAR]);
+
+        IPath androidSrc = null;
+        String androidSrcOsPath = null;
+        IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+        if (target != null) {
+            androidSrcOsPath =
+                ProjectHelper.loadStringProperty(root, getAndroidSourceProperty(target));
+        }
+        if (androidSrcOsPath != null && androidSrcOsPath.trim().length() > 0) {
+            androidSrc = new Path(androidSrcOsPath);
+        }
+        if (androidSrc == null) {
+            androidSrc = new Path(paths[CACHE_INDEX_SRC]);
+            File androidSrcFile = new File(paths[CACHE_INDEX_SRC]);
+            if (!androidSrcFile.isDirectory()) {
+                androidSrc = null;
+            }
+        }
+
+        if (androidSrc == null && target != null) {
+            Bundle bundle = getSourceBundle();
+
+            if (bundle != null) {
+                AndroidVersion version = target.getVersion();
+                String apiString = version.getApiString();
+                String sourcePath = apiString + SOURCES_ZIP;
+                URL sourceURL = bundle.getEntry(sourcePath);
+                if (sourceURL != null) {
+                    URL url = null;
+                    try {
+                        url = FileLocator.resolve(sourceURL);
+                    } catch (IOException ignore) {
+                    }
+                    if (url != null) {
+                        androidSrcOsPath = url.getFile();
+                        if (new File(androidSrcOsPath).isFile()) {
+                            androidSrc = new Path(androidSrcOsPath);
+                        }
+                    }
+                }
+            }
+        }
 
         // create the java doc link.
-        IClasspathAttribute cpAttribute = JavaCore.newClasspathAttribute(
-                IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME,
-                paths[CACHE_INDEX_DOCS_URI]);
+        String androidApiURL = ProjectHelper.loadStringProperty(root, PROPERTY_ANDROID_API);
+        String apiURL = null;
+        if (androidApiURL != null && testURL(androidApiURL)) {
+            apiURL = androidApiURL;
+        } else {
+            if (testURL(paths[CACHE_INDEX_DOCS_URI])) {
+                apiURL = paths[CACHE_INDEX_DOCS_URI];
+            } else if (testURL(ANDROID_API_REFERENCE)) {
+                apiURL = ANDROID_API_REFERENCE;
+            }
+        }
 
-        // create the access rule to restrict access to classes in com.android.internal
-        IAccessRule accessRule = JavaCore.newAccessRule(
-                new Path("com/android/internal/**"), //$NON-NLS-1$
+        IClasspathAttribute[] attributes = null;
+        if (apiURL != null && !NULL_API_URL.equals(apiURL)) {
+            IClasspathAttribute cpAttribute = JavaCore.newClasspathAttribute(
+                    IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME, apiURL);
+            attributes = new IClasspathAttribute[] {
+                cpAttribute
+            };
+        }
+        // create the access rule to restrict access to classes in
+        // com.android.internal
+        IAccessRule accessRule = JavaCore.newAccessRule(new Path("com/android/internal/**"), //$NON-NLS-1$
                 IAccessRule.K_NON_ACCESSIBLE);
 
-        IClasspathEntry frameworkClasspathEntry = JavaCore.newLibraryEntry(android_lib,
-                android_src, // source attachment path
-                null,        // default source attachment root path.
+        IClasspathEntry frameworkClasspathEntry = JavaCore.newLibraryEntry(androidLib,
+                androidSrc, // source attachment path
+                null, // default source attachment root path.
                 new IAccessRule[] { accessRule },
-                new IClasspathAttribute[] { cpAttribute },
+                attributes,
                 false // not exported.
                 );
 
@@ -480,12 +484,11 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
             while (i < paths.length) {
                 Path jarPath = new Path(paths[i++]);
 
-                IClasspathAttribute[] attributes = null;
+                attributes = null;
                 if (docPath.length() > 0) {
                     attributes = new IClasspathAttribute[] {
-                            JavaCore.newClasspathAttribute(
-                                    IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME,
-                                    docPath)
+                        JavaCore.newClasspathAttribute(
+                                IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME, docPath)
                     };
                 }
 
@@ -501,7 +504,63 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
             }
         }
 
+        if (apiURL != null) {
+            ProjectHelper.saveStringProperty(root, PROPERTY_ANDROID_API, apiURL);
+        }
+        if (androidSrc != null && target != null) {
+            ProjectHelper.saveStringProperty(root, getAndroidSourceProperty(target),
+                    androidSrc.toOSString());
+        }
         return list.toArray(new IClasspathEntry[list.size()]);
+    }
+
+    private static Bundle getSourceBundle() {
+        String bundleId = System.getProperty(COM_ANDROID_IDE_ECLIPSE_ADT_SOURCE,
+                COM_ANDROID_IDE_ECLIPSE_ADT_SOURCE);
+        Bundle bundle = Platform.getBundle(bundleId);
+        return bundle;
+    }
+
+    private static String getAndroidSourceProperty(IAndroidTarget target) {
+        if (target == null) {
+            return null;
+        }
+        String androidSourceProperty = PROPERTY_ANDROID_SOURCE + "_"
+                + target.getVersion().getApiString();
+        return androidSourceProperty;
+    }
+
+    /**
+     * Cache results for testURL: Some are expensive to compute, and this is
+     * called repeatedly (perhaps for each open project)
+     */
+    private static final Map<String, Boolean> sRecentUrlValidCache =
+            Maps.newHashMapWithExpectedSize(4);
+
+    @SuppressWarnings("resource") // Eclipse does not handle Closeables#closeQuietly
+    private static boolean testURL(String androidApiURL) {
+        Boolean cached = sRecentUrlValidCache.get(androidApiURL);
+        if (cached != null) {
+            return cached.booleanValue();
+        }
+        boolean valid = false;
+        InputStream is = null;
+        try {
+            URL testURL = new URL(androidApiURL);
+            URLConnection connection = testURL.openConnection();
+            // Only try for 5 seconds (though some implementations ignore this flag)
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            is = connection.getInputStream();
+            valid = true;
+        } catch (Exception ignore) {
+        } finally {
+            Closeables.closeQuietly(is);
+        }
+
+        sRecentUrlValidCache.put(androidApiURL, valid);
+
+        return valid;
     }
 
     /**
@@ -527,10 +586,11 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
             // project that have been resolved before the sdk was loaded
             // will have a ProjectState where the IAndroidTarget is null
             // so we load the target now that the SDK is loaded.
-            IAndroidTarget target = currentSdk.loadTarget(Sdk.getProjectState(iProject));
+            IAndroidTarget target = currentSdk.loadTargetAndBuildTools(
+                    Sdk.getProjectState(iProject));
             if (target == null) {
                 // this is really not supposed to happen. This would mean there are cached paths,
-                // but default.properties was deleted. Keep the project in the list to force
+                // but project.properties was deleted. Keep the project in the list to force
                 // a resolve which will display the error.
                 i++;
                 continue;
@@ -661,5 +721,96 @@ public class AndroidClasspathContainerInitializer extends ClasspathContainerInit
         }
 
         return paths.toArray(new String[paths.size()]);
+    }
+
+    @Override
+    public boolean canUpdateClasspathContainer(IPath containerPath, IJavaProject project) {
+        return true;
+    }
+
+    @Override
+    public void requestClasspathContainerUpdate(IPath containerPath, IJavaProject project,
+            IClasspathContainer containerSuggestion) throws CoreException {
+        AdtPlugin plugin = AdtPlugin.getDefault();
+
+        synchronized (Sdk.getLock()) {
+            boolean sdkIsLoaded = plugin.getSdkLoadStatus() == LoadStatus.LOADED;
+
+            // check if the project has a valid target.
+            IAndroidTarget target = null;
+            if (sdkIsLoaded) {
+                target = Sdk.getCurrent().getTarget(project.getProject());
+            }
+            if (sdkIsLoaded && target != null) {
+                String[] paths = getTargetPaths(target);
+                IPath android_lib = new Path(paths[CACHE_INDEX_JAR]);
+                IClasspathEntry[] entries = containerSuggestion.getClasspathEntries();
+                for (int i = 0; i < entries.length; i++) {
+                    IClasspathEntry entry = entries[i];
+                    if (entry.getEntryKind() == IClasspathEntry.CPE_LIBRARY) {
+                        IPath entryPath = entry.getPath();
+
+                        if (entryPath != null) {
+                            if (entryPath.equals(android_lib)) {
+                                IPath entrySrcPath = entry.getSourceAttachmentPath();
+                                IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+                                if (entrySrcPath != null) {
+                                    ProjectHelper.saveStringProperty(root,
+                                            getAndroidSourceProperty(target),
+                                            entrySrcPath.toString());
+                                } else {
+                                    ProjectHelper.saveStringProperty(root,
+                                            getAndroidSourceProperty(target), null);
+                                }
+                                IClasspathAttribute[] extraAttributtes = entry.getExtraAttributes();
+                                if (extraAttributtes.length == 0) {
+                                    ProjectHelper.saveStringProperty(root, PROPERTY_ANDROID_API,
+                                            NULL_API_URL);
+                                }
+                                for (int j = 0; j < extraAttributtes.length; j++) {
+                                    IClasspathAttribute extraAttribute = extraAttributtes[j];
+                                    String value = extraAttribute.getValue();
+                                    if ((value == null || value.trim().length() == 0)
+                                            && IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME
+                                                    .equals(extraAttribute.getName())) {
+                                        value = NULL_API_URL;
+                                    }
+                                    if (IClasspathAttribute.JAVADOC_LOCATION_ATTRIBUTE_NAME
+                                            .equals(extraAttribute.getName())) {
+                                        ProjectHelper.saveStringProperty(root,
+                                                PROPERTY_ANDROID_API, value);
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                rebindClasspathEntries(project.getJavaModel(), containerPath);
+            }
+        }
+    }
+
+    private static void rebindClasspathEntries(IJavaModel model, IPath containerPath)
+            throws JavaModelException {
+        ArrayList<IJavaProject> affectedProjects = new ArrayList<IJavaProject>();
+
+        IJavaProject[] projects = model.getJavaProjects();
+        for (int i = 0; i < projects.length; i++) {
+            IJavaProject project = projects[i];
+            IClasspathEntry[] entries = project.getRawClasspath();
+            for (int k = 0; k < entries.length; k++) {
+                IClasspathEntry curr = entries[k];
+                if (curr.getEntryKind() == IClasspathEntry.CPE_CONTAINER
+                        && containerPath.equals(curr.getPath())) {
+                    affectedProjects.add(project);
+                }
+            }
+        }
+        if (!affectedProjects.isEmpty()) {
+            IJavaProject[] affected = affectedProjects
+                    .toArray(new IJavaProject[affectedProjects.size()]);
+            updateProjects(affected);
+        }
     }
 }

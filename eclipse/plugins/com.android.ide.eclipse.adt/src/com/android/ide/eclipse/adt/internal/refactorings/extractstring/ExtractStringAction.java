@@ -16,7 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.refactorings.extractstring;
 
-import com.android.ide.eclipse.adt.AndroidConstants;
+import com.android.ide.eclipse.adt.AdtConstants;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -80,10 +80,12 @@ public class ExtractStringAction implements IWorkbenchWindowActionDelegate {
     /**
      * Keep track of the current workbench window.
      */
+    @Override
     public void init(IWorkbenchWindow window) {
         mWindow = window;
     }
 
+    @Override
     public void dispose() {
         // Nothing to do
     }
@@ -93,6 +95,7 @@ public class ExtractStringAction implements IWorkbenchWindowActionDelegate {
      * <p/>
      * Keep a link to the relevant selection structure (i.e. a part of the Java AST).
      */
+    @Override
     public void selectionChanged(IAction action, ISelection selection) {
 
         // Note, two kinds of selections are returned here:
@@ -119,6 +122,7 @@ public class ExtractStringAction implements IWorkbenchWindowActionDelegate {
     /**
      * Create a new instance of our refactoring and a wizard to configure it.
      */
+    @Override
     public void run(IAction action) {
         if (mSelection != null && mFile != null) {
             ExtractStringRefactoring ref = new ExtractStringRefactoring(mFile, mEditor, mSelection);
@@ -165,7 +169,7 @@ public class ExtractStringAction implements IWorkbenchWindowActionDelegate {
                 if (file.exists()) {
                     IProject proj = file.getProject();
                     try {
-                        if (proj != null && proj.hasNature(AndroidConstants.NATURE_DEFAULT)) {
+                        if (proj != null && proj.hasNature(AdtConstants.NATURE_DEFAULT)) {
                             return file;
                         }
                     } catch (CoreException e) {

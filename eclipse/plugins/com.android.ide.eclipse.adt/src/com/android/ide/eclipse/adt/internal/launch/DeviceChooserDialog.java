@@ -17,9 +17,9 @@
 package com.android.ide.eclipse.adt.internal.launch;
 
 import com.android.ddmlib.AndroidDebugBridge;
+import com.android.ddmlib.AndroidDebugBridge.IDeviceChangeListener;
 import com.android.ddmlib.Client;
 import com.android.ddmlib.IDevice;
-import com.android.ddmlib.AndroidDebugBridge.IDeviceChangeListener;
 import com.android.ddmlib.IDevice.DeviceState;
 import com.android.ddmuilib.ImageLoader;
 import com.android.ddmuilib.TableHelper;
@@ -29,7 +29,7 @@ import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.ide.eclipse.ddms.DdmsPlugin;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.internal.avd.AvdManager.AvdInfo;
+import com.android.sdklib.internal.avd.AvdInfo;
 import com.android.sdkuilib.internal.widgets.AvdSelector;
 import com.android.sdkuilib.internal.widgets.AvdSelector.DisplayMode;
 import com.android.sdkuilib.internal.widgets.AvdSelector.IAvdFilter;
@@ -57,6 +57,9 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Table;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * A dialog that lets the user choose a device to deploy an application.
  * The user can either choose an exiting running device (including running emulators)
@@ -80,9 +83,12 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
     private final DeviceChooserResponse mResponse;
     private final String mPackageName;
     private final IAndroidTarget mProjectTarget;
+    private final AndroidVersion mMinApiVersion;
     private final Sdk mSdk;
 
     private Button mDeviceRadioButton;
+    private Button mUseDeviceForFutureLaunchesCheckbox;
+    private static boolean sUseDeviceForFutureLaunchesValue = false;
 
     private boolean mDisableAvdSelectionChange = false;
 
@@ -91,23 +97,41 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
      * a {@link AndroidDebugBridge}.
      */
     private class ContentProvider implements IStructuredContentProvider {
+        @Override
         public Object[] getElements(Object inputElement) {
             if (inputElement instanceof AndroidDebugBridge) {
-                return ((AndroidDebugBridge)inputElement).getDevices();
+                return findCompatibleDevices(((AndroidDebugBridge)inputElement).getDevices());
             }
 
             return new Object[0];
         }
 
+        private Object[] findCompatibleDevices(IDevice[] devices) {
+            if (devices == null) {
+                return null;
+            }
+
+            List<IDevice> compatibleDevices = new ArrayList<IDevice>(devices.length);
+            for (IDevice device : devices) {
+                AndroidVersion deviceVersion = Sdk.getDeviceVersion(device);
+                if (deviceVersion == null || deviceVersion.canRun(mMinApiVersion)) {
+                    compatibleDevices.add(device);
+                }
+            }
+
+            return compatibleDevices.toArray();
+        }
+
+        @Override
         public void dispose() {
             // pass
         }
 
+        @Override
         public void inputChanged(Viewer viewer, Object oldInput, Object newInput) {
             // pass
         }
     }
-
 
     /**
      * A Label Provider for the {@link TableViewer} in {@link DeviceChooserDialog}.
@@ -115,6 +139,7 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
      */
     private class LabelProvider implements ITableLabelProvider {
 
+        @Override
         public Image getColumnImage(Object element, int columnIndex) {
             if (element instanceof IDevice) {
                 IDevice device = (IDevice)element;
@@ -130,7 +155,7 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
                             if (deviceVersion == null) {
                                 return mWarningImage;
                             } else {
-                                if (deviceVersion.canRun(mProjectTarget.getVersion()) == false) {
+                                if (!deviceVersion.canRun(mMinApiVersion)) {
                                     return mNoMatchImage;
                                 }
 
@@ -143,11 +168,17 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
                             // get the AvdInfo
                             AvdInfo info = mSdk.getAvdManager().getAvd(device.getAvdName(),
                                     true /*validAvdOnly*/);
-                            if (info == null) {
-                                return mWarningImage;
+                            AvdCompatibility.Compatibility c =
+                                    AvdCompatibility.canRun(info, mProjectTarget,
+                                            mMinApiVersion);
+                            switch (c) {
+                                case YES:
+                                    return mMatchImage;
+                                case NO:
+                                    return mNoMatchImage;
+                                case UNKNOWN:
+                                    return mWarningImage;
                             }
-                            return mProjectTarget.canRunOn(info.getTarget()) ?
-                                    mMatchImage : mNoMatchImage;
                         }
                 }
             }
@@ -155,12 +186,13 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
             return null;
         }
 
+        @Override
         public String getColumnText(Object element, int columnIndex) {
             if (element instanceof IDevice) {
                 IDevice device = (IDevice)element;
                 switch (columnIndex) {
                     case 0:
-                        return device.getSerialNumber();
+                        return device.getName();
                     case 1:
                         if (device.isEmulator()) {
                             return device.getAvdName();
@@ -197,19 +229,23 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
             return null;
         }
 
+        @Override
         public void addListener(ILabelProviderListener listener) {
             // pass
         }
 
+        @Override
         public void dispose() {
             // pass
         }
 
+        @Override
         public boolean isLabelProperty(Object element, String property) {
             // pass
             return false;
         }
 
+        @Override
         public void removeListener(ILabelProviderListener listener) {
             // pass
         }
@@ -218,6 +254,7 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
     public static class DeviceChooserResponse {
         private AvdInfo mAvdToLaunch;
         private IDevice mDeviceToUse;
+        private boolean mUseDeviceForFutureLaunches;
 
         public void setDeviceToUse(IDevice d) {
             mDeviceToUse = d;
@@ -236,14 +273,24 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
         public AvdInfo getAvdToLaunch() {
             return mAvdToLaunch;
         }
+
+        public void setUseDeviceForFutureLaunches(boolean en) {
+            mUseDeviceForFutureLaunches = en;
+        }
+
+        public boolean useDeviceForFutureLaunches() {
+            return mUseDeviceForFutureLaunches;
+        }
     }
 
     public DeviceChooserDialog(Shell parent, DeviceChooserResponse response, String packageName,
-            IAndroidTarget projectTarget) {
+            IAndroidTarget projectTarget, AndroidVersion minApiVersion) {
         super(parent);
+
         mResponse = response;
         mPackageName = packageName;
         mProjectTarget = projectTarget;
+        mMinApiVersion = minApiVersion;
         mSdk = Sdk.getCurrent();
 
         AndroidDebugBridge.addDeviceChangeListener(this);
@@ -278,6 +325,38 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
         return content;
     }
 
+    /**
+     * Create the button bar: We override the Dialog implementation of this method
+     * so that we can create the checkbox at the same level as the 'Cancel' and 'OK' buttons.
+     */
+    @Override
+    protected Control createButtonBar(Composite parent) {
+        Composite composite = new Composite(parent, SWT.NONE);
+
+        GridLayout layout = new GridLayout(1, false);
+        layout.marginHeight = convertVerticalDLUsToPixels(IDialogConstants.VERTICAL_MARGIN);
+        composite.setLayout(layout);
+        composite.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+
+        mUseDeviceForFutureLaunchesCheckbox = new Button(composite, SWT.CHECK);
+        mUseDeviceForFutureLaunchesCheckbox.setSelection(sUseDeviceForFutureLaunchesValue);
+        mResponse.setUseDeviceForFutureLaunches(sUseDeviceForFutureLaunchesValue);
+        mUseDeviceForFutureLaunchesCheckbox.setText("Use same device for future launches");
+        mUseDeviceForFutureLaunchesCheckbox.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                sUseDeviceForFutureLaunchesValue =
+                        mUseDeviceForFutureLaunchesCheckbox.getSelection();
+                mResponse.setUseDeviceForFutureLaunches(sUseDeviceForFutureLaunchesValue);
+            }
+        });
+        mUseDeviceForFutureLaunchesCheckbox.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+
+        createButton(composite, IDialogConstants.OK_ID, IDialogConstants.OK_LABEL, true);
+        createButton(composite, IDialogConstants.CANCEL_ID, IDialogConstants.CANCEL_LABEL, false);
+
+        return composite;
+    }
 
     @Override
     protected Control createDialogArea(Composite parent) {
@@ -287,9 +366,16 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
         Composite top = new Composite(parent, SWT.NONE);
         top.setLayout(new GridLayout(1, true));
 
+        String msg;
+        if (mProjectTarget.isPlatform()) {
+            msg = String.format("Select a device with min API level %s.",
+                    mMinApiVersion.getApiString());
+        } else {
+            msg = String.format("Select a device compatible with target %s.",
+                    mProjectTarget.getFullName());
+        }
         Label label = new Label(top, SWT.NONE);
-        label.setText(String.format("Select a device compatible with target %s.",
-                mProjectTarget.getFullName()));
+        label.setText(msg);
 
         mDeviceRadioButton = new Button(top, SWT.RADIO);
         mDeviceRadioButton.setText("Choose a running Android device");
@@ -428,7 +514,6 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
             }
         });
 
-
         return top;
     }
 
@@ -462,7 +547,7 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
         }
 
         if (mWarningImage == null) {
-            mNoMatchImage = factory.getIcon("warning", //$NON-NLS-1$
+            mWarningImage = factory.getIcon("warning", //$NON-NLS-1$
                     SWT.COLOR_YELLOW,
                     IconFactory.SHAPE_DEFAULT);
         }
@@ -494,9 +579,11 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
      *
      * @see IDeviceChangeListener#deviceConnected(IDevice)
      */
+    @Override
     public void deviceConnected(IDevice device) {
         final DeviceChooserDialog dialog = this;
         exec(new Runnable() {
+            @Override
             public void run() {
                 if (mDeviceTable.isDisposed() == false) {
                     // refresh all
@@ -526,6 +613,7 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
      *
      * @see IDeviceChangeListener#deviceDisconnected(IDevice)
      */
+    @Override
     public void deviceDisconnected(IDevice device) {
         deviceConnected(device);
     }
@@ -539,10 +627,12 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
      *
      * @see IDeviceChangeListener#deviceChanged(IDevice, int)
      */
+    @Override
     public void deviceChanged(final IDevice device, int changeMask) {
         if ((changeMask & (IDevice.CHANGE_STATE | IDevice.CHANGE_BUILD_INFO)) != 0) {
             final DeviceChooserDialog dialog = this;
             exec(new Runnable() {
+                @Override
                 public void run() {
                     if (mDeviceTable.isDisposed() == false) {
                         // refresh the device
@@ -672,23 +762,31 @@ public class DeviceChooserDialog extends Dialog implements IDeviceChangeListener
 
         private IDevice[] mDevices;
 
+        @Override
         public void prepare() {
             mDevices = AndroidDebugBridge.getBridge().getDevices();
         }
 
+        @Override
         public boolean accept(AvdInfo avd) {
             if (mDevices != null) {
                 for (IDevice d : mDevices) {
-                    if (mProjectTarget.canRunOn(avd.getTarget()) == false ||
-                            avd.getName().equals(d.getAvdName())) {
+                    // do not accept running avd's
+                    if (avd.getName().equals(d.getAvdName())) {
                         return false;
                     }
+
+                    // only accept avd's that can actually run the project
+                    AvdCompatibility.Compatibility c =
+                            AvdCompatibility.canRun(avd, mProjectTarget, mMinApiVersion);
+                    return (c == AvdCompatibility.Compatibility.NO) ? false : true;
                 }
             }
 
             return true;
         }
 
+        @Override
         public void cleanup() {
             mDevices = null;
         }

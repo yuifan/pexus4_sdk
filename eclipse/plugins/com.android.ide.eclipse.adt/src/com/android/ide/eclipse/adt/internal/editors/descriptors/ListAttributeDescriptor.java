@@ -16,7 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.editors.descriptors;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
+import com.android.ide.common.api.IAttributeInfo;
 import com.android.ide.eclipse.adt.internal.editors.ui.ListValueCellEditor;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
@@ -34,15 +34,25 @@ public class ListAttributeDescriptor extends TextAttributeDescriptor {
     private String[] mValues = null;
 
     /**
+     * Used by {@link DescriptorsUtils} to create instances of this descriptor.
+     */
+    public static final ITextAttributeCreator CREATOR = new ITextAttributeCreator() {
+        @Override
+        public TextAttributeDescriptor create(String xmlLocalName,
+                String nsUri, IAttributeInfo attrInfo) {
+            return new ListAttributeDescriptor(xmlLocalName, nsUri, attrInfo);
+        }
+    };
+
+    /**
      * Creates a new {@link ListAttributeDescriptor}.
      * <p/>
      * If <code>attrInfo</code> is not null and has non-null enum values, these will be
      * used for the list.
      * Otherwise values are automatically extracted from the FrameworkResourceManager.
      */
-    public ListAttributeDescriptor(String xmlLocalName, String uiName, String nsUri,
-            String tooltip, IAttributeInfo attrInfo) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+    public ListAttributeDescriptor(String xmlLocalName, String nsUri, IAttributeInfo attrInfo) {
+        super(xmlLocalName, nsUri, attrInfo);
         if (attrInfo != null) {
             mValues = attrInfo.getEnumValues();
         }
@@ -52,9 +62,9 @@ public class ListAttributeDescriptor extends TextAttributeDescriptor {
      * Creates a new {@link ListAttributeDescriptor} which uses the provided values
      * and does not lookup the content of <code>attrInfo</code>.
      */
-    public ListAttributeDescriptor(String xmlLocalName, String uiName, String nsUri,
-            String tooltip, IAttributeInfo attrInfo, String[] values) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+    public ListAttributeDescriptor(String xmlLocalName, String nsUri, IAttributeInfo attrInfo,
+            String[] values) {
+        super(xmlLocalName, nsUri, attrInfo);
         mValues = values;
     }
 

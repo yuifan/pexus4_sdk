@@ -16,38 +16,45 @@
 
 package com.android.ide.eclipse.adt.internal.ui;
 
-import com.android.ide.eclipse.adt.internal.resources.configurations.CountryCodeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.DockModeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.FolderConfiguration;
-import com.android.ide.eclipse.adt.internal.resources.configurations.KeyboardStateQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.LanguageQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.NavigationMethodQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.NavigationStateQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.NetworkCodeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.NightModeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.PixelDensityQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.RegionQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ResourceQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenDimensionQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenOrientationQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenRatioQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ScreenSizeQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.TextInputMethodQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.TouchScreenQualifier;
-import com.android.ide.eclipse.adt.internal.resources.configurations.VersionQualifier;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
-import com.android.sdklib.resources.Density;
-import com.android.sdklib.resources.DockMode;
-import com.android.sdklib.resources.Keyboard;
-import com.android.sdklib.resources.KeyboardState;
-import com.android.sdklib.resources.Navigation;
-import com.android.sdklib.resources.NavigationState;
-import com.android.sdklib.resources.NightMode;
-import com.android.sdklib.resources.ResourceEnum;
-import com.android.sdklib.resources.ScreenOrientation;
-import com.android.sdklib.resources.ScreenRatio;
-import com.android.sdklib.resources.ScreenSize;
-import com.android.sdklib.resources.TouchScreen;
+import com.android.SdkConstants;
+import com.android.ide.common.resources.configuration.CountryCodeQualifier;
+import com.android.ide.common.resources.configuration.DensityQualifier;
+import com.android.ide.common.resources.configuration.FolderConfiguration;
+import com.android.ide.common.resources.configuration.KeyboardStateQualifier;
+import com.android.ide.common.resources.configuration.LanguageQualifier;
+import com.android.ide.common.resources.configuration.LayoutDirectionQualifier;
+import com.android.ide.common.resources.configuration.NavigationMethodQualifier;
+import com.android.ide.common.resources.configuration.NavigationStateQualifier;
+import com.android.ide.common.resources.configuration.NetworkCodeQualifier;
+import com.android.ide.common.resources.configuration.NightModeQualifier;
+import com.android.ide.common.resources.configuration.RegionQualifier;
+import com.android.ide.common.resources.configuration.ResourceQualifier;
+import com.android.ide.common.resources.configuration.ScreenDimensionQualifier;
+import com.android.ide.common.resources.configuration.ScreenHeightQualifier;
+import com.android.ide.common.resources.configuration.ScreenOrientationQualifier;
+import com.android.ide.common.resources.configuration.ScreenRatioQualifier;
+import com.android.ide.common.resources.configuration.ScreenSizeQualifier;
+import com.android.ide.common.resources.configuration.ScreenWidthQualifier;
+import com.android.ide.common.resources.configuration.SmallestScreenWidthQualifier;
+import com.android.ide.common.resources.configuration.TextInputMethodQualifier;
+import com.android.ide.common.resources.configuration.TouchScreenQualifier;
+import com.android.ide.common.resources.configuration.UiModeQualifier;
+import com.android.ide.common.resources.configuration.VersionQualifier;
+import com.android.ide.eclipse.adt.internal.editors.layout.configuration.LocaleManager;
+import com.android.ide.eclipse.adt.internal.resources.ResourceHelper;
+import com.android.resources.Density;
+import com.android.resources.Keyboard;
+import com.android.resources.KeyboardState;
+import com.android.resources.LayoutDirection;
+import com.android.resources.Navigation;
+import com.android.resources.NavigationState;
+import com.android.resources.NightMode;
+import com.android.resources.ResourceEnum;
+import com.android.resources.ScreenOrientation;
+import com.android.resources.ScreenRatio;
+import com.android.resources.ScreenSize;
+import com.android.resources.TouchScreen;
+import com.android.resources.UiMode;
 
 import org.eclipse.jface.viewers.ILabelProviderListener;
 import org.eclipse.jface.viewers.ISelection;
@@ -85,7 +92,10 @@ import org.eclipse.swt.widgets.TableColumn;
 import org.eclipse.swt.widgets.Text;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Custom UI widget to let user build a Folder configuration.
@@ -116,7 +126,7 @@ public class ConfigurationSelector extends Composite {
 
     private final HashMap<Class<? extends ResourceQualifier>, QualifierEditBase> mUiMap =
         new HashMap<Class<? extends ResourceQualifier>, QualifierEditBase>();
-    private final boolean mDeviceMode;
+    private final SelectorMode mMode;
     private Composite mQualifierEditParent;
     private IQualifierFilter mQualifierFilter;
 
@@ -124,6 +134,7 @@ public class ConfigurationSelector extends Composite {
      * Basic of {@link VerifyListener} to only accept digits.
      */
     private static class DigitVerifier implements VerifyListener {
+        @Override
         public void verifyText(VerifyEvent e) {
             // check for digit only.
             for (int i = 0 ; i < e.text.length(); i++) {
@@ -159,6 +170,7 @@ public class ConfigurationSelector extends Composite {
      * Implementation of {@link VerifyListener} for the Language and Region qualifiers.
      */
     public static class LanguageRegionVerifier implements VerifyListener {
+        @Override
         public void verifyText(VerifyEvent e) {
             // check for length
             if (e.text.length() - e.end + e.start + ((Combo)e.getSource()).getText().length() > 2) {
@@ -178,7 +190,7 @@ public class ConfigurationSelector extends Composite {
     }
 
     /**
-     * Implementation of {@link VerifyListener} for the Pixel Density qualifier.
+     * Implementation of {@link VerifyListener} for the Density qualifier.
      */
     public static class DensityVerifier extends DigitVerifier { }
 
@@ -195,6 +207,25 @@ public class ConfigurationSelector extends Composite {
     }
 
     /**
+     * Behavior mode for the Selector.
+     *
+     * @see #DEFAULT
+     * @see #DEVICE_ONLY
+     * @see #CONFIG_ONLY
+     */
+    public enum SelectorMode {
+        /** the default mode */
+        DEFAULT,
+        /** mode forcing the qualifier values to be valid on a device.
+         * For instance {@link Density#NODPI} is a valid qualifier for a resource configuration but
+         * this is not valid on a device */
+        DEVICE_ONLY,
+        /** mode where only the specific config can be edited. The user can only select
+         * which non-empty qualifier to select. */
+        CONFIG_ONLY;
+    }
+
+    /**
      * A filter for {@link ResourceQualifier}.
      * @see ConfigurationSelector#setQualifierFilter(IQualifierFilter)
      */
@@ -207,19 +238,17 @@ public class ConfigurationSelector extends Composite {
 
     /**
      * Creates the selector.
+     * <p/>
+     * The {@link SelectorMode} changes the behavior of the selector depending on what is being
+     * edited (a device config, a resource config, a given configuration).
      *
-     * If the device mode is <code>true</code> then the configuration selector only
-     * allows to create configuration that are valid on a device (as opposed to resource
-     * configuration).
-     * For instance {@link Density#NODPI} is a valid qualifier for a resource configuration but
-     * this is not valid on a device.
      * @param parent the composite parent.
-     * @param deviceMode the device mode.
+     * @param mode the mode for the selector.
      */
-    public ConfigurationSelector(Composite parent, boolean deviceMode) {
+    public ConfigurationSelector(Composite parent, SelectorMode mode) {
         super(parent, SWT.NONE);
-        mDeviceMode  = deviceMode;
 
+        mMode  = mode;
         mBaseConfiguration.createDefault();
 
         GridLayout gl = new GridLayout(4, false);
@@ -247,10 +276,13 @@ public class ConfigurationSelector extends Composite {
 
         mFullTableViewer = new TableViewer(fullTable);
         mFullTableViewer.setContentProvider(new QualifierContentProvider());
+        // the label provider must return the value of the label only if the mode is
+        // CONFIG_ONLY
         mFullTableViewer.setLabelProvider(new QualifierLabelProvider(
-                false /* showQualifierValue */));
+                mMode == SelectorMode.CONFIG_ONLY));
         mFullTableViewer.setInput(mBaseConfiguration);
         mFullTableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
+            @Override
             public void selectionChanged(SelectionChangedEvent event) {
                 ISelection selection = event.getSelection();
                 if (selection instanceof IStructuredSelection) {
@@ -344,10 +376,12 @@ public class ConfigurationSelector extends Composite {
         });
         mSelectionTableViewer = new TableViewer(selectionTable);
         mSelectionTableViewer.setContentProvider(new QualifierContentProvider());
+        // always show the qualifier value in this case.
         mSelectionTableViewer.setLabelProvider(new QualifierLabelProvider(
                 true /* showQualifierValue */));
         mSelectionTableViewer.setInput(mSelectedConfiguration);
         mSelectionTableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
+            @Override
             public void selectionChanged(SelectionChangedEvent event) {
                 // ignore selection changes during resfreshes in some cases.
                 if (mOnRefresh) {
@@ -364,20 +398,24 @@ public class ConfigurationSelector extends Composite {
                         if (first instanceof ResourceQualifier) {
                             mRemoveButton.setEnabled(true);
 
-                            QualifierEditBase composite = mUiMap.get(first.getClass());
+                            if (mMode != SelectorMode.CONFIG_ONLY) {
+                                QualifierEditBase composite = mUiMap.get(first.getClass());
 
-                            if (composite != null) {
-                                composite.setQualifier((ResourceQualifier)first);
+                                if (composite != null) {
+                                    composite.setQualifier((ResourceQualifier)first);
+                                }
+
+                                mStackLayout.topControl = composite;
+                                mQualifierEditParent.layout();
                             }
-
-                            mStackLayout.topControl = composite;
-                            mQualifierEditParent.layout();
 
                             return;
                         }
                     } else {
-                        mStackLayout.topControl = null;
-                        mQualifierEditParent.layout();
+                        if (mMode != SelectorMode.CONFIG_ONLY) {
+                            mStackLayout.topControl = null;
+                            mQualifierEditParent.layout();
+                        }
                     }
                 }
 
@@ -385,29 +423,40 @@ public class ConfigurationSelector extends Composite {
             }
         });
 
-        // 4th column is the detail of the selected qualifier
-        mQualifierEditParent = new Composite(this, SWT.NONE);
-        mQualifierEditParent.setLayout(mStackLayout = new StackLayout());
-        mQualifierEditParent.setLayoutData(new GridData(GridData.FILL_VERTICAL));
+        if (mMode != SelectorMode.CONFIG_ONLY) {
+            // 4th column is the detail of the selected qualifier
+            mQualifierEditParent = new Composite(this, SWT.NONE);
+            mQualifierEditParent.setLayout(mStackLayout = new StackLayout());
+            mQualifierEditParent.setLayoutData(new GridData(GridData.FILL_VERTICAL));
 
-        // create the UI for all the qualifiers, and associate them to the ResourceQualifer class.
-        mUiMap.put(CountryCodeQualifier.class, new MCCEdit(mQualifierEditParent));
-        mUiMap.put(NetworkCodeQualifier.class, new MNCEdit(mQualifierEditParent));
-        mUiMap.put(LanguageQualifier.class, new LanguageEdit(mQualifierEditParent));
-        mUiMap.put(RegionQualifier.class, new RegionEdit(mQualifierEditParent));
-        mUiMap.put(ScreenSizeQualifier.class, new ScreenSizeEdit(mQualifierEditParent));
-        mUiMap.put(ScreenRatioQualifier.class, new ScreenRatioEdit(mQualifierEditParent));
-        mUiMap.put(ScreenOrientationQualifier.class, new OrientationEdit(mQualifierEditParent));
-        mUiMap.put(DockModeQualifier.class, new DockModeEdit(mQualifierEditParent));
-        mUiMap.put(NightModeQualifier.class, new NightModeEdit(mQualifierEditParent));
-        mUiMap.put(PixelDensityQualifier.class, new PixelDensityEdit(mQualifierEditParent));
-        mUiMap.put(TouchScreenQualifier.class, new TouchEdit(mQualifierEditParent));
-        mUiMap.put(KeyboardStateQualifier.class, new KeyboardEdit(mQualifierEditParent));
-        mUiMap.put(TextInputMethodQualifier.class, new TextInputEdit(mQualifierEditParent));
-        mUiMap.put(NavigationStateQualifier.class, new NavigationStateEdit(mQualifierEditParent));
-        mUiMap.put(NavigationMethodQualifier.class, new NavigationEdit(mQualifierEditParent));
-        mUiMap.put(ScreenDimensionQualifier.class, new ScreenDimensionEdit(mQualifierEditParent));
-        mUiMap.put(VersionQualifier.class, new VersionEdit(mQualifierEditParent));
+            // create the UI for all the qualifiers, and associate them to the
+            // ResourceQualifer class.
+            mUiMap.put(CountryCodeQualifier.class, new MCCEdit(mQualifierEditParent));
+            mUiMap.put(NetworkCodeQualifier.class, new MNCEdit(mQualifierEditParent));
+            mUiMap.put(LanguageQualifier.class, new LanguageEdit(mQualifierEditParent));
+            mUiMap.put(RegionQualifier.class, new RegionEdit(mQualifierEditParent));
+            mUiMap.put(LayoutDirectionQualifier.class,
+                    new LayoutDirectionEdit(mQualifierEditParent));
+            mUiMap.put(SmallestScreenWidthQualifier.class,
+                    new SmallestScreenWidthEdit(mQualifierEditParent));
+            mUiMap.put(ScreenWidthQualifier.class, new ScreenWidthEdit(mQualifierEditParent));
+            mUiMap.put(ScreenHeightQualifier.class, new ScreenHeightEdit(mQualifierEditParent));
+            mUiMap.put(ScreenSizeQualifier.class, new ScreenSizeEdit(mQualifierEditParent));
+            mUiMap.put(ScreenRatioQualifier.class, new ScreenRatioEdit(mQualifierEditParent));
+            mUiMap.put(ScreenOrientationQualifier.class, new OrientationEdit(mQualifierEditParent));
+            mUiMap.put(UiModeQualifier.class, new UiModeEdit(mQualifierEditParent));
+            mUiMap.put(NightModeQualifier.class, new NightModeEdit(mQualifierEditParent));
+            mUiMap.put(DensityQualifier.class, new DensityEdit(mQualifierEditParent));
+            mUiMap.put(TouchScreenQualifier.class, new TouchEdit(mQualifierEditParent));
+            mUiMap.put(KeyboardStateQualifier.class, new KeyboardEdit(mQualifierEditParent));
+            mUiMap.put(TextInputMethodQualifier.class, new TextInputEdit(mQualifierEditParent));
+            mUiMap.put(NavigationStateQualifier.class,
+                    new NavigationStateEdit(mQualifierEditParent));
+            mUiMap.put(NavigationMethodQualifier.class, new NavigationEdit(mQualifierEditParent));
+            mUiMap.put(ScreenDimensionQualifier.class,
+                    new ScreenDimensionEdit(mQualifierEditParent));
+            mUiMap.put(VersionQualifier.class, new VersionEdit(mQualifierEditParent));
+        }
     }
 
     /**
@@ -434,12 +483,21 @@ public class ConfigurationSelector extends Composite {
      * @param config The configuration.
      */
     public void setConfiguration(FolderConfiguration config) {
-        mSelectedConfiguration.set(config, true /*nonFakeValuesOnly*/);
-        mSelectionTableViewer.refresh();
 
-        // create the base config, which is the default config minus the qualifiers
-        // in SelectedConfiguration
-        mBaseConfiguration.substract(mSelectedConfiguration);
+        if (mMode != SelectorMode.CONFIG_ONLY) {
+            mSelectedConfiguration.set(config, true /*nonFakeValuesOnly*/);
+
+            // create the base config, which is the default config minus the qualifiers
+            // in SelectedConfiguration
+            mBaseConfiguration.substract(mSelectedConfiguration);
+        } else {
+            // set the base config to the edited config.
+            // reset the config to be empty
+            mBaseConfiguration.reset();
+            mBaseConfiguration.set(config, true /*nonFakeValuesOnly*/);
+        }
+
+        mSelectionTableViewer.refresh();
         mFullTableViewer.refresh();
     }
 
@@ -452,7 +510,7 @@ public class ConfigurationSelector extends Composite {
      * @return true if success, or false if the folder name is not a valid name.
      */
     public boolean setConfiguration(String[] folderSegments) {
-        FolderConfiguration config = ResourceManager.getInstance().getConfig(folderSegments);
+        FolderConfiguration config = FolderConfiguration.getConfig(folderSegments);
 
         if (config == null) {
             return false;
@@ -471,7 +529,7 @@ public class ConfigurationSelector extends Composite {
      */
     public boolean setConfiguration(String folderName) {
         // split the name of the folder in segments.
-        String[] folderSegments = folderName.split(FolderConfiguration.QUALIFIER_SEP);
+        String[] folderSegments = folderName.split(SdkConstants.RES_QUALIFIER_SEP);
 
         return setConfiguration(folderSegments);
     }
@@ -537,9 +595,9 @@ public class ConfigurationSelector extends Composite {
     private void fillCombo(Combo combo, ResourceEnum[] resEnums) {
         for (ResourceEnum resEnum : resEnums) {
             // only add the enum if:
-            // device mode is false OR (device mode is true and) it's a valid device value.
+            // not in device mode OR (device mode is true and) it's a valid device value.
             // Also, always ignore fake values.
-            if ((mDeviceMode == false || resEnum.isValidValueForDevice()) &&
+            if ((mMode == SelectorMode.DEFAULT || resEnum.isValidValueForDevice()) &&
                     resEnum.isFakeValue() == false) {
                 combo.add(resEnum.getShortDisplayValue());
             }
@@ -556,10 +614,12 @@ public class ConfigurationSelector extends Composite {
         public QualifierContentProvider() {
         }
 
+        @Override
         public void dispose() {
             // pass
         }
 
+        @Override
         public Object[] getElements(Object inputElement) {
             // default easy case
             if (mQualifierFilter == null) {
@@ -577,6 +637,7 @@ public class ConfigurationSelector extends Composite {
             return list.toArray();
         }
 
+        @Override
         public void inputChanged(Viewer viewer, Object oldInput, Object newInput) {
             mInput = null;
             if (newInput instanceof FolderConfiguration) {
@@ -596,6 +657,7 @@ public class ConfigurationSelector extends Composite {
             mShowQualifierValue = showQualifierValue;
         }
 
+        @Override
         public String getColumnText(Object element, int columnIndex) {
             // only one column, so we can ignore columnIndex
             if (element instanceof ResourceQualifier) {
@@ -616,28 +678,33 @@ public class ConfigurationSelector extends Composite {
             return null;
         }
 
+        @Override
         public Image getColumnImage(Object element, int columnIndex) {
             // only one column, so we can ignore columnIndex
             if (element instanceof ResourceQualifier) {
-                return ((ResourceQualifier)element).getIcon();
+                return ResourceHelper.getIcon(((ResourceQualifier)element).getClass());
             }
 
             return null;
         }
 
+        @Override
         public void addListener(ILabelProviderListener listener) {
             // pass
         }
 
+        @Override
         public void dispose() {
             // pass
         }
 
+        @Override
         public boolean isLabelProperty(Object element, String property) {
             // pass
             return false;
         }
 
+        @Override
         public void removeListener(ILabelProviderListener listener) {
             // pass
         }
@@ -672,6 +739,7 @@ public class ConfigurationSelector extends Composite {
             mText.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mText.addVerifyListener(new MobileCodeVerifier());
             mText.addModifyListener(new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onTextChange();
                 }
@@ -738,6 +806,7 @@ public class ConfigurationSelector extends Composite {
             mText.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mText.addVerifyListener(new MobileCodeVerifier());
             mText.addModifyListener(new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onTextChange();
                 }
@@ -795,33 +864,55 @@ public class ConfigurationSelector extends Composite {
      */
     private class LanguageEdit extends QualifierEditBase {
         private Combo mLanguage;
+        private Label mName;
 
         public LanguageEdit(Composite parent) {
             super(parent, LanguageQualifier.NAME);
 
             mLanguage = new Combo(this, SWT.DROP_DOWN);
+            Set<String> codes = LocaleManager.getLanguageCodes();
+            String[] items = codes.toArray(new String[codes.size()]);
+            Arrays.sort(items);
+            mLanguage.setItems(items);
+
             mLanguage.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mLanguage.addVerifyListener(new LanguageRegionVerifier());
             mLanguage.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onLanguageChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onLanguageChange();
                 }
             });
             mLanguage.addModifyListener(new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onLanguageChange();
                 }
             });
 
             new Label(this, SWT.NONE).setText("(2 letter code)");
+
+            mName = new Label(this, SWT.NONE);
+            mName.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+
         }
 
         private void onLanguageChange() {
             // update the current config
             String value = mLanguage.getText();
+
+            String newName = "";
+            if (value.length() == 2) {
+                String name = LocaleManager.getLanguageName(value.toLowerCase(Locale.US));
+                if (name != null) {
+                    newName = name;
+                }
+            }
+            mName.setText(newName);
 
             if (value.length() == 0) {
                 // empty string, means no qualifier.
@@ -871,14 +962,17 @@ public class ConfigurationSelector extends Composite {
             mRegion.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mRegion.addVerifyListener(new LanguageRegionVerifier());
             mRegion.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onRegionChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onRegionChange();
                 }
             });
             mRegion.addModifyListener(new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onRegionChange();
                 }
@@ -927,6 +1021,266 @@ public class ConfigurationSelector extends Composite {
     }
 
     /**
+     * Edit widget for {@link LayoutDirectionQualifier}.
+     */
+    private class LayoutDirectionEdit extends QualifierEditBase {
+
+        private Combo mDirection;
+
+        public LayoutDirectionEdit(Composite parent) {
+            super(parent, LayoutDirectionQualifier.NAME);
+
+            mDirection = new Combo(this, SWT.DROP_DOWN | SWT.READ_ONLY);
+            fillCombo(mDirection, LayoutDirection.values());
+
+            mDirection.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+            mDirection.addSelectionListener(new SelectionListener() {
+                @Override
+                public void widgetDefaultSelected(SelectionEvent e) {
+                    onDirectionChange();
+                }
+                @Override
+                public void widgetSelected(SelectionEvent e) {
+                    onDirectionChange();
+                }
+            });
+        }
+
+        protected void onDirectionChange() {
+            // update the current config
+            int index = mDirection.getSelectionIndex();
+
+            if (index != -1) {
+                mSelectedConfiguration.setLayoutDirectionQualifier(new LayoutDirectionQualifier(
+                        LayoutDirection.getByIndex(index)));
+            } else {
+                // empty selection, means no qualifier.
+                // Since the qualifier classes are immutable, and we don't want to
+                // remove the qualifier from the configuration, we create a new default one.
+                mSelectedConfiguration.setLayoutDirectionQualifier(
+                        new LayoutDirectionQualifier());
+            }
+
+            // notify of change
+            onChange(true /* keepSelection */);
+        }
+
+        @Override
+        public void setQualifier(ResourceQualifier qualifier) {
+            LayoutDirectionQualifier q = (LayoutDirectionQualifier)qualifier;
+
+            LayoutDirection value = q.getValue();
+            if (value == null) {
+                mDirection.clearSelection();
+            } else {
+                mDirection.select(LayoutDirection.getIndex(value));
+            }
+        }
+    }
+
+
+    /**
+     * Edit widget for {@link SmallestScreenWidthQualifier}.
+     */
+    private class SmallestScreenWidthEdit extends QualifierEditBase {
+
+        private Text mSize;
+
+        public SmallestScreenWidthEdit(Composite parent) {
+            super(parent, SmallestScreenWidthQualifier.NAME);
+
+            ModifyListener modifyListener = new ModifyListener() {
+                @Override
+                public void modifyText(ModifyEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            FocusAdapter focusListener = new FocusAdapter() {
+                @Override
+                public void focusLost(FocusEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            mSize = new Text(this, SWT.BORDER);
+            mSize.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+            mSize.addVerifyListener(new DimensionVerifier());
+            mSize.addModifyListener(modifyListener);
+            mSize.addFocusListener(focusListener);
+        }
+
+        private void onSizeChange() {
+            // update the current config
+            String size = mSize.getText();
+
+            if (size.length() == 0) {
+                // if one of the strings is empty, reset to no qualifier.
+                // Since the qualifier classes are immutable, and we don't want to
+                // remove the qualifier from the configuration, we create a new default one.
+                mSelectedConfiguration.setSmallestScreenWidthQualifier(
+                        new SmallestScreenWidthQualifier());
+            } else {
+                SmallestScreenWidthQualifier qualifier = SmallestScreenWidthQualifier.getQualifier(
+                        size);
+
+                if (qualifier != null) {
+                    mSelectedConfiguration.setSmallestScreenWidthQualifier(qualifier);
+                } else {
+                    // Failure! Looks like the value is wrong, reset the qualifier
+                    // Since the qualifier classes are immutable, and we don't want to
+                    // remove the qualifier from the configuration, we create a new default one.
+                    mSelectedConfiguration.setSmallestScreenWidthQualifier(
+                            new SmallestScreenWidthQualifier());
+                }
+            }
+
+            // notify of change
+            onChange(true /* keepSelection */);
+        }
+
+        @Override
+        public void setQualifier(ResourceQualifier qualifier) {
+            SmallestScreenWidthQualifier q = (SmallestScreenWidthQualifier)qualifier;
+
+            mSize.setText(Integer.toString(q.getValue()));
+        }
+    }
+
+    /**
+     * Edit widget for {@link ScreenWidthQualifier}.
+     */
+    private class ScreenWidthEdit extends QualifierEditBase {
+
+        private Text mSize;
+
+        public ScreenWidthEdit(Composite parent) {
+            super(parent, ScreenWidthQualifier.NAME);
+
+            ModifyListener modifyListener = new ModifyListener() {
+                @Override
+                public void modifyText(ModifyEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            FocusAdapter focusListener = new FocusAdapter() {
+                @Override
+                public void focusLost(FocusEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            mSize = new Text(this, SWT.BORDER);
+            mSize.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+            mSize.addVerifyListener(new DimensionVerifier());
+            mSize.addModifyListener(modifyListener);
+            mSize.addFocusListener(focusListener);
+        }
+
+        private void onSizeChange() {
+            // update the current config
+            String size = mSize.getText();
+
+            if (size.length() == 0) {
+                // if one of the strings is empty, reset to no qualifier.
+                // Since the qualifier classes are immutable, and we don't want to
+                // remove the qualifier from the configuration, we create a new default one.
+                mSelectedConfiguration.setScreenWidthQualifier(new ScreenWidthQualifier());
+            } else {
+                ScreenWidthQualifier qualifier = ScreenWidthQualifier.getQualifier(size);
+
+                if (qualifier != null) {
+                    mSelectedConfiguration.setScreenWidthQualifier(qualifier);
+                } else {
+                    // Failure! Looks like the value is wrong, reset the qualifier
+                    // Since the qualifier classes are immutable, and we don't want to
+                    // remove the qualifier from the configuration, we create a new default one.
+                    mSelectedConfiguration.setScreenWidthQualifier(
+                            new ScreenWidthQualifier());
+                }
+            }
+
+            // notify of change
+            onChange(true /* keepSelection */);
+        }
+
+        @Override
+        public void setQualifier(ResourceQualifier qualifier) {
+            ScreenWidthQualifier q = (ScreenWidthQualifier)qualifier;
+
+            mSize.setText(Integer.toString(q.getValue()));
+        }
+    }
+
+    /**
+     * Edit widget for {@link ScreenHeightQualifier}.
+     */
+    private class ScreenHeightEdit extends QualifierEditBase {
+
+        private Text mSize;
+
+        public ScreenHeightEdit(Composite parent) {
+            super(parent, ScreenHeightQualifier.NAME);
+
+            ModifyListener modifyListener = new ModifyListener() {
+                @Override
+                public void modifyText(ModifyEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            FocusAdapter focusListener = new FocusAdapter() {
+                @Override
+                public void focusLost(FocusEvent e) {
+                    onSizeChange();
+                }
+            };
+
+            mSize = new Text(this, SWT.BORDER);
+            mSize.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+            mSize.addVerifyListener(new DimensionVerifier());
+            mSize.addModifyListener(modifyListener);
+            mSize.addFocusListener(focusListener);
+        }
+
+        private void onSizeChange() {
+            // update the current config
+            String size = mSize.getText();
+
+            if (size.length() == 0) {
+                // if one of the strings is empty, reset to no qualifier.
+                // Since the qualifier classes are immutable, and we don't want to
+                // remove the qualifier from the configuration, we create a new default one.
+                mSelectedConfiguration.setScreenHeightQualifier(new ScreenHeightQualifier());
+            } else {
+                ScreenHeightQualifier qualifier = ScreenHeightQualifier.getQualifier(size);
+
+                if (qualifier != null) {
+                    mSelectedConfiguration.setScreenHeightQualifier(qualifier);
+                } else {
+                    // Failure! Looks like the value is wrong, reset the qualifier
+                    // Since the qualifier classes are immutable, and we don't want to
+                    // remove the qualifier from the configuration, we create a new default one.
+                    mSelectedConfiguration.setScreenHeightQualifier(
+                            new ScreenHeightQualifier());
+                }
+            }
+
+            // notify of change
+            onChange(true /* keepSelection */);
+        }
+
+        @Override
+        public void setQualifier(ResourceQualifier qualifier) {
+            ScreenHeightQualifier q = (ScreenHeightQualifier)qualifier;
+
+            mSize.setText(Integer.toString(q.getValue()));
+        }
+    }
+
+
+    /**
      * Edit widget for {@link ScreenSizeQualifier}.
      */
     private class ScreenSizeEdit extends QualifierEditBase {
@@ -941,9 +1295,11 @@ public class ConfigurationSelector extends Composite {
 
             mSize.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mSize.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onScreenSizeChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onScreenSizeChange();
                 }
@@ -956,7 +1312,7 @@ public class ConfigurationSelector extends Composite {
 
             if (index != -1) {
                 mSelectedConfiguration.setScreenSizeQualifier(new ScreenSizeQualifier(
-                    ScreenSize.getByIndex(index)));
+                        ScreenSize.getByIndex(index)));
             } else {
                 // empty selection, means no qualifier.
                 // Since the qualifier classes are immutable, and we don't want to
@@ -997,9 +1353,11 @@ public class ConfigurationSelector extends Composite {
 
             mRatio.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mRatio.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onScreenRatioChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onScreenRatioChange();
                 }
@@ -1053,9 +1411,11 @@ public class ConfigurationSelector extends Composite {
 
             mOrientation.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mOrientation.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onOrientationChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onOrientationChange();
                 }
@@ -1097,21 +1457,23 @@ public class ConfigurationSelector extends Composite {
     /**
      * Edit widget for {@link DockModeQualifier}.
      */
-    private class DockModeEdit extends QualifierEditBase {
+    private class UiModeEdit extends QualifierEditBase {
 
-        private Combo mDockMode;
+        private Combo mUiMode;
 
-        public DockModeEdit(Composite parent) {
-            super(parent, DockModeQualifier.NAME);
+        public UiModeEdit(Composite parent) {
+            super(parent, UiModeQualifier.NAME);
 
-            mDockMode = new Combo(this, SWT.DROP_DOWN | SWT.READ_ONLY);
-            fillCombo(mDockMode, DockMode.values());
+            mUiMode = new Combo(this, SWT.DROP_DOWN | SWT.READ_ONLY);
+            fillCombo(mUiMode, UiMode.values());
 
-            mDockMode.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
-            mDockMode.addSelectionListener(new SelectionListener() {
+            mUiMode.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
+            mUiMode.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onDockModeChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onDockModeChange();
                 }
@@ -1120,16 +1482,16 @@ public class ConfigurationSelector extends Composite {
 
         protected void onDockModeChange() {
             // update the current config
-            int index = mDockMode.getSelectionIndex();
+            int index = mUiMode.getSelectionIndex();
 
             if (index != -1) {
-                mSelectedConfiguration.setDockModeQualifier(
-                        new DockModeQualifier(DockMode.getByIndex(index)));
+                mSelectedConfiguration.setUiModeQualifier(
+                        new UiModeQualifier(UiMode.getByIndex(index)));
             } else {
                 // empty selection, means no qualifier.
                 // Since the qualifier classes are immutable, and we don't want to
                 // remove the qualifier from the configuration, we create a new default one.
-                mSelectedConfiguration.setDockModeQualifier(new DockModeQualifier());
+                mSelectedConfiguration.setUiModeQualifier(new UiModeQualifier());
             }
 
             // notify of change
@@ -1138,13 +1500,13 @@ public class ConfigurationSelector extends Composite {
 
         @Override
         public void setQualifier(ResourceQualifier qualifier) {
-            DockModeQualifier q = (DockModeQualifier)qualifier;
+            UiModeQualifier q = (UiModeQualifier)qualifier;
 
-            DockMode value = q.getValue();
+            UiMode value = q.getValue();
             if (value == null) {
-                mDockMode.clearSelection();
+                mUiMode.clearSelection();
             } else {
-                mDockMode.select(DockMode.getIndex(value));
+                mUiMode.select(UiMode.getIndex(value));
             }
         }
     }
@@ -1164,9 +1526,11 @@ public class ConfigurationSelector extends Composite {
 
             mNightMode.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mNightMode.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onNightModeChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onNightModeChange();
                 }
@@ -1206,22 +1570,24 @@ public class ConfigurationSelector extends Composite {
 
 
     /**
-     * Edit widget for {@link PixelDensityQualifier}.
+     * Edit widget for {@link DensityQualifier}.
      */
-    private class PixelDensityEdit extends QualifierEditBase {
+    private class DensityEdit extends QualifierEditBase {
         private Combo mDensity;
 
-        public PixelDensityEdit(Composite parent) {
-            super(parent, PixelDensityQualifier.NAME);
+        public DensityEdit(Composite parent) {
+            super(parent, DensityQualifier.NAME);
 
             mDensity = new Combo(this, SWT.DROP_DOWN | SWT.READ_ONLY);
             fillCombo(mDensity, Density.values());
 
             mDensity.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mDensity.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onDensityChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onDensityChange();
                 }
@@ -1233,14 +1599,14 @@ public class ConfigurationSelector extends Composite {
             int index = mDensity.getSelectionIndex();
 
             if (index != -1) {
-                mSelectedConfiguration.setPixelDensityQualifier(new PixelDensityQualifier(
+                mSelectedConfiguration.setDensityQualifier(new DensityQualifier(
                     Density.getByIndex(index)));
             } else {
                 // empty selection, means no qualifier.
                 // Since the qualifier classes are immutable, and we don't want to
                 // remove the qualifier from the configuration, we create a new default one.
-                mSelectedConfiguration.setPixelDensityQualifier(
-                        new PixelDensityQualifier());
+                mSelectedConfiguration.setDensityQualifier(
+                        new DensityQualifier());
             }
 
             // notify of change
@@ -1249,7 +1615,7 @@ public class ConfigurationSelector extends Composite {
 
         @Override
         public void setQualifier(ResourceQualifier qualifier) {
-            PixelDensityQualifier q = (PixelDensityQualifier)qualifier;
+            DensityQualifier q = (DensityQualifier)qualifier;
 
             Density value = q.getValue();
             if (value == null) {
@@ -1275,9 +1641,11 @@ public class ConfigurationSelector extends Composite {
 
             mTouchScreen.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mTouchScreen.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onTouchChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onTouchChange();
                 }
@@ -1330,9 +1698,11 @@ public class ConfigurationSelector extends Composite {
 
             mKeyboardState.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mKeyboardState.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onKeyboardChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onKeyboardChange();
                 }
@@ -1386,9 +1756,11 @@ public class ConfigurationSelector extends Composite {
 
             mTextInput.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mTextInput.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onTextInputChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onTextInputChange();
                 }
@@ -1442,9 +1814,11 @@ public class ConfigurationSelector extends Composite {
 
             mNavigationState.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mNavigationState.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onNavigationChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onNavigationChange();
                 }
@@ -1498,9 +1872,11 @@ public class ConfigurationSelector extends Composite {
 
             mNavigation.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mNavigation.addSelectionListener(new SelectionListener() {
+                @Override
                 public void widgetDefaultSelected(SelectionEvent e) {
                     onNavigationChange();
                 }
+                @Override
                 public void widgetSelected(SelectionEvent e) {
                     onNavigationChange();
                 }
@@ -1551,6 +1927,7 @@ public class ConfigurationSelector extends Composite {
             super(parent, ScreenDimensionQualifier.NAME);
 
             ModifyListener modifyListener = new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onSizeChange();
                 }
@@ -1627,6 +2004,7 @@ public class ConfigurationSelector extends Composite {
             mText.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
             mText.addVerifyListener(new MobileCodeVerifier());
             mText.addModifyListener(new ModifyListener() {
+                @Override
                 public void modifyText(ModifyEvent e) {
                     onVersionChange();
                 }

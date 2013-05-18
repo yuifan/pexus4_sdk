@@ -72,13 +72,14 @@ import java.net.URL;
  * Derived classes must implement createFormPages to create the forms before the
  * source editor. This can be a no-op if desired.
  */
+@SuppressWarnings("restriction")
 public abstract class AndroidTextEditor extends FormEditor implements IResourceChangeListener {
 
     /** Preference name for the current page of this file */
     private static final String PREF_CURRENT_PAGE = "_current_page";
 
     /** Id string used to create the Android SDK browser */
-    private static String BROWSER_ID = "android"; // $NON-NLS-1$
+    private static String BROWSER_ID = "android"; //$NON-NLS-1$
 
     /** Page id of the XML source editor, used for switching tabs programmatically */
     public final static String TEXT_EDITOR_ID = "editor_part"; //$NON-NLS-1$
@@ -283,12 +284,14 @@ public abstract class AndroidTextEditor extends FormEditor implements IResourceC
      * Closes all project files on project close.
      * @see IResourceChangeListener
      */
+    @Override
     public void resourceChanged(final IResourceChangeEvent event) {
         if (event.getType() == IResourceChangeEvent.PRE_CLOSE) {
             Display.getDefault().asyncExec(new Runnable() {
+                @Override
                 public void run() {
-                    IWorkbenchPage[] pages = getSite().getWorkbenchWindow()
-                            .getPages();
+                    @SuppressWarnings("hiding")
+                    IWorkbenchPage[] pages = getSite().getWorkbenchWindow().getPages();
                     for (int i = 0; i < pages.length; i++) {
                         if (((FileEditorInput)mTextEditor.getEditorInput())
                                 .getFile().getProject().equals(
@@ -315,6 +318,20 @@ public abstract class AndroidTextEditor extends FormEditor implements IResourceC
         if (!(editorInput instanceof IFileEditorInput))
             throw new PartInitException("Invalid Input: Must be IFileEditorInput");
         super.init(site, editorInput);
+    }
+
+    /**
+     * Returns the {@link IFile} matching the editor's input or null.
+     * <p/>
+     * By construction, the editor input has to be an {@link IFileEditorInput} so it must
+     * have an associated {@link IFile}. Null can only be returned if this editor has no
+     * input somehow.
+     */
+    public IFile getFile() {
+        if (getEditorInput() instanceof IFileEditorInput) {
+            return ((IFileEditorInput) getEditorInput()).getFile();
+        }
+        return null;
     }
 
     /**
@@ -488,10 +505,12 @@ public abstract class AndroidTextEditor extends FormEditor implements IResourceC
             mDocument = provider.getDocument(getEditorInput());
 
             mDocument.addDocumentListener(new IDocumentListener() {
+                @Override
                 public void documentChanged(DocumentEvent event) {
                     onDocumentChanged(event);
                 }
 
+                @Override
                 public void documentAboutToBeChanged(DocumentEvent event) {
                     // ignore
                 }

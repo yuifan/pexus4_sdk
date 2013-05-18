@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 The Android Open Source Project
+ * Copyright (C) 2011 The Android Open Source Project
  *
  * Licensed under the Eclipse Public License, Version 1.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,18 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.eclipse.adt.internal.wizards.newproject;
 
+import com.android.ide.eclipse.adt.internal.wizards.newproject.NewProjectWizardState.Mode;
 
 /**
  * A "New Test Android Project" Wizard.
  * <p/>
- * This is really the {@link NewProjectWizard} that only displays the "test project" page.
+ * This is really the {@link NewProjectWizard} that only displays the "test project" pages.
  */
 public class NewTestProjectWizard extends NewProjectWizard {
-
+    /**
+     * Creates a new wizard for creating an Android Test Project
+     */
     public NewTestProjectWizard() {
-        super(AvailablePages.TEST_PROJECT_ONLY);
+        super(Mode.TEST);
     }
 }

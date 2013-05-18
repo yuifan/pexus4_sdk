@@ -2,15 +2,16 @@
 <feature
       id="com.android.ide.eclipse.ddms"
       label="Android DDMS"
-      version="0.9.9.qualifier"
-      provider-name="The Android Open Source Project">
+      version="22.0.0.qualifier"
+      provider-name="The Android Open Source Project"
+      plugin="com.android.ide.eclipse.ddms">
 
    <description>
       Android Dalvik Debug Monitor Service
    </description>
 
    <copyright>
-      Copyright (C) 2007 The Android Open Source Project
+      Copyright (C) 2007-2011 The Android Open Source Project
    </copyright>
 
    <license url="http://www.apache.org/licenses/LICENSE-2.0">
@@ -227,14 +228,20 @@
    </url>
 
    <requires>
-      <import plugin="org.eclipse.ui"/>
-      <import plugin="org.eclipse.core.runtime"/>
+      <import plugin="org.eclipse.ui" version="3.6.2" match="greaterOrEqual"/>
+      <import plugin="org.eclipse.core.runtime" version="3.6.0" match="greaterOrEqual"/>
       <import plugin="org.eclipse.ui.console"/>
       <import plugin="org.eclipse.core.resources"/>
       <import plugin="org.eclipse.ui.ide"/>
       <import plugin="org.eclipse.core.filesystem"/>
-      <import plugin="org.eclipse.jdt.core"/>
    </requires>
+
+   <plugin
+         id="com.android.ide.eclipse.base"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
 
    <plugin
          id="com.android.ide.eclipse.ddms"

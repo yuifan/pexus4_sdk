@@ -16,16 +16,15 @@
 
 package com.android.ide.eclipse.adt.internal.editors.uimodel;
 
+import com.android.SdkConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.editors.AndroidXmlEditor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.DescriptorsUtils;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ListAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
-import com.android.ide.eclipse.adt.internal.editors.descriptors.XmlnsAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.ui.SectionHelper;
 import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData;
-import com.android.sdklib.SdkConstants;
 
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.swt.SWT;
@@ -87,6 +86,7 @@ public class UiListAttributeNode extends UiAbstractTextAttributeNode {
              * Sent when the text is modified, whether by the user via manual
              * input or programmatic input via setText().
              */
+            @Override
             public void modifyText(ModifyEvent e) {
                 onComboChange();
             }
@@ -102,6 +102,7 @@ public class UiListAttributeNode extends UiAbstractTextAttributeNode {
 
         // Remove self-reference when the widget is disposed
         mCombo.addDisposeListener(new DisposeListener() {
+            @Override
             public void widgetDisposed(DisposeEvent e) {
                 mCombo = null;
             }
@@ -139,9 +140,9 @@ public class UiListAttributeNode extends UiAbstractTextAttributeNode {
         // FrameworkResourceManager expects a specific prefix for the attribute.
         String nsPrefix = "";
         if (SdkConstants.NS_RESOURCES.equals(descriptor.getNamespaceUri())) {
-            nsPrefix = "android:"; //$NON-NLS-1$
-        } else if (XmlnsAttributeDescriptor.XMLNS_URI.equals(descriptor.getNamespaceUri())) {
-            nsPrefix = "xmlns:"; //$NON-NLS-1$
+            nsPrefix = SdkConstants.ANDROID_NS_NAME + ':';
+        } else if (SdkConstants.XMLNS_URI.equals(descriptor.getNamespaceUri())) {
+            nsPrefix = SdkConstants.XMLNS_PREFIX;
         }
         attr_name = nsPrefix + attr_name;
 

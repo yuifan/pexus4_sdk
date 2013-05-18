@@ -2,7 +2,7 @@
 <feature
       id="com.android.ide.eclipse.adt"
       label="Android Development Tools"
-      version="0.9.9.qualifier"
+      version="22.0.0.qualifier"
       provider-name="The Android Open Source Project"
       plugin="com.android.ide.eclipse.adt">
 
@@ -11,12 +11,11 @@
    </description>
 
    <copyright>
-      Copyright (C) 2007 The Android Open Source Project
+      Copyright (C) 2007-2011 The Android Open Source Project
    </copyright>
 
    <license url="http://www.eclipse.org/org/documents/epl-v10.php">
       Note:  kxml2-2.3.0.jar is under the BSD license rather than the EPL.  You can find a copy of the BSD License at http://www.opensource.org/licenses/bsd-license.php
-      Note:  groovy-all-1.7.0.jar is under a BSD/Apache license rather than the EPL.  For details, please see http://groovy.codehaus.org/faq.html#licence .
 
       Eclipse Public License - v 1.0
 
@@ -112,8 +111,9 @@ This Agreement is governed by the laws of the State of New York and the intellec
    </url>
 
    <requires>
+      <import plugin="com.android.ide.eclipse.base" match="perfect"/>
       <import plugin="com.android.ide.eclipse.ddms" match="perfect"/>
-      <import plugin="org.eclipse.core.runtime"/>
+      <import plugin="org.eclipse.core.runtime" version="3.6.0" match="greaterOrEqual"/>
       <import plugin="org.eclipse.core.resources"/>
       <import plugin="org.eclipse.debug.core"/>
       <import plugin="org.eclipse.debug.ui"/>
@@ -127,10 +127,9 @@ This Agreement is governed by the laws of the State of New York and the intellec
       <import plugin="org.eclipse.ui.workbench.texteditor"/>
       <import plugin="org.eclipse.ui.console"/>
       <import plugin="org.eclipse.core.filesystem"/>
-      <import plugin="org.eclipse.ui"/>
+      <import plugin="org.eclipse.ui" version="3.6" match="greaterOrEqual"/>
       <import plugin="org.eclipse.ui.ide"/>
       <import plugin="org.eclipse.ui.forms"/>
-      <import plugin="org.eclipse.gef"/>
       <import plugin="org.eclipse.ui.browser"/>
       <import plugin="org.eclipse.ui.views"/>
       <import plugin="org.eclipse.wst.sse.core"/>
@@ -142,6 +141,7 @@ This Agreement is governed by the laws of the State of New York and the intellec
       <import plugin="org.eclipse.ltk.core.refactoring"/>
       <import plugin="org.eclipse.ltk.ui.refactoring"/>
       <import plugin="org.eclipse.core.expressions"/>
+      <import plugin="org.eclipse.compare"/>
    </requires>
 
    <plugin
@@ -150,5 +150,18 @@ This Agreement is governed by the laws of the State of New York and the intellec
          install-size="0"
          version="0.0.0"
          unpack="false"/>
+
+   <plugin
+         id="overlay.com.android.ide.eclipse.adt.overlay"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         unpack="false"/>
+
+   <plugin
+         id="com.android.ide.eclipse.adt.package"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"/>
 
 </feature>

@@ -95,7 +95,8 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
      *  manipulated by this tree view. In general this is the manifest UI node. */
     private UiElementNode mUiRootNode;
     /** The descriptor of the elements to be displayed as root in this tree view. All elements
-     *  of the same type in the root will be displayed. */
+     *  of the same type in the root will be displayed. Can be null or empty to mean everything
+     *  can be displayed. */
     private ElementDescriptor[] mDescriptorFilters;
     /** The title for the master-detail part (displayed on the top "tab" on top of the tree) */
     private String mTitle;
@@ -260,6 +261,7 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
         // all parts in the managed form.
         // This is picked up by UiElementDetail.selectionChanged().
         mTreeViewer.addSelectionChangedListener(new ISelectionChangedListener() {
+            @Override
             public void selectionChanged(SelectionChangedEvent event) {
                 managedForm.fireSelectionChanged(mMasterPart, event.getSelection());
                 adjustTreeButtons(event.getSelection());
@@ -271,12 +273,14 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
         // - One to refresh the tree viewer when the framework resources have changed
         // - One to enable/disable the UI based on the application node's presence.
         mUiRefreshListener = new IUiUpdateListener() {
+            @Override
             public void uiElementNodeUpdated(UiElementNode ui_node, UiUpdateState state) {
                 mTreeViewer.refresh();
             }
         };
 
         mUiEnableListener = new IUiUpdateListener() {
+            @Override
             public void uiElementNodeUpdated(UiElementNode ui_node, UiUpdateState state) {
                 // The UiElementNode for the application XML node always exists, even
                 // if there is no corresponding XML node in the XML file.
@@ -335,6 +339,7 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
 
         // Remove listeners when the tree widget gets disposed.
         tree.addDisposeListener(new DisposeListener() {
+            @Override
             public void widgetDisposed(DisposeEvent e) {
                 if (mUiRootNode != null) {
                     UiElementNode node = mUiRootNode.getUiParent() != null ?
@@ -485,7 +490,8 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
              * tree selection and if it is of the appropriate type it re-creates
              * the necessary actions.
              */
-           public void menuAboutToShow(IMenuManager manager) {
+           @Override
+        public void menuAboutToShow(IMenuManager manager) {
                ISelection selection = mTreeViewer.getSelection();
                if (!selection.isEmpty() && selection instanceof ITreeSelection) {
                    ArrayList<UiElementNode> selected = filterSelection((ITreeSelection) selection);
@@ -594,8 +600,8 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
      */
     private void adjustTreeButtons(ISelection selection) {
         mRemoveButton.setEnabled(!selection.isEmpty() && selection instanceof ITreeSelection);
-        mUpButton.setEnabled(!selection.isEmpty() && selection instanceof ITreeSelection);
-        mDownButton.setEnabled(!selection.isEmpty() && selection instanceof ITreeSelection);
+        mUpButton.setEnabled(canDoTreeUp(selection));
+        mDownButton.setEnabled(canDoTreeDown(selection));
     }
 
     /**
@@ -636,11 +642,10 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
      *
      * @return A new list of {@link UiElementNode} with at least one item or null.
      */
-    @SuppressWarnings("unchecked")
     private ArrayList<UiElementNode> filterSelection(ITreeSelection selection) {
         ArrayList<UiElementNode> selected = new ArrayList<UiElementNode>();
 
-        for (Iterator it = selection.iterator(); it.hasNext(); ) {
+        for (Iterator<Object> it = selection.iterator(); it.hasNext(); ) {
             Object selectedObj = it.next();
 
             if (selectedObj instanceof UiElementNode) {
@@ -700,8 +705,23 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
         ISelection selection = mTreeViewer.getSelection();
         if (!selection.isEmpty() && selection instanceof ITreeSelection) {
             ArrayList<UiElementNode> selected = filterSelection((ITreeSelection) selection);
-            mUiTreeActions.doUp(selected);
+            mUiTreeActions.doUp(selected, mDescriptorFilters);
         }
+    }
+
+    /**
+     * Checks whether the "up" action can be done on the current selection.
+     *
+     * @param selection The current tree selection.
+     * @return True if all the selected nodes can be moved up.
+     */
+    protected boolean canDoTreeUp(ISelection selection) {
+        if (!selection.isEmpty() && selection instanceof ITreeSelection) {
+            ArrayList<UiElementNode> selected = filterSelection((ITreeSelection) selection);
+            return mUiTreeActions.canDoUp(selected, mDescriptorFilters);
+        }
+
+        return false;
     }
 
     /**
@@ -714,8 +734,23 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
         ISelection selection = mTreeViewer.getSelection();
         if (!selection.isEmpty() && selection instanceof ITreeSelection) {
             ArrayList<UiElementNode> selected = filterSelection((ITreeSelection) selection);
-            mUiTreeActions.doDown(selected);
+            mUiTreeActions.doDown(selected, mDescriptorFilters);
         }
+    }
+
+    /**
+     * Checks whether the "down" action can be done on the current selection.
+     *
+     * @param selection The current tree selection.
+     * @return True if all the selected nodes can be moved down.
+     */
+    protected boolean canDoTreeDown(ISelection selection) {
+        if (!selection.isEmpty() && selection instanceof ITreeSelection) {
+            ArrayList<UiElementNode> selected = filterSelection((ITreeSelection) selection);
+            return mUiTreeActions.canDoDown(selected, mDescriptorFilters);
+        }
+
+        return false;
     }
 
     /**
@@ -729,6 +764,7 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
     }
 
     /* Implements ICommitXml for CopyCutAction */
+    @Override
     public void commitPendingXmlChanges() {
         commitManagedForm();
     }
@@ -739,21 +775,22 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
     }
 
     @Override
-    protected void registerPages(DetailsPart detailsPart) {
+    protected void registerPages(DetailsPart inDetailsPart) {
         // Keep a reference on the details part (the super class doesn't provide a getter
         // for it.)
-        mDetailsPart = detailsPart;
+        mDetailsPart = inDetailsPart;
 
         // The page selection mechanism does not use pages registered by association with
         // a node class. Instead it uses a custom details page provider that provides a
         // new UiElementDetail instance for each node instance. A limit of 5 pages is
         // then set (the value is arbitrary but should be reasonable) for the internal
         // page book.
-        detailsPart.setPageLimit(5);
+        inDetailsPart.setPageLimit(5);
 
         final UiTreeBlock tree = this;
 
-        detailsPart.setPageProvider(new IDetailsPageProvider() {
+        inDetailsPart.setPageProvider(new IDetailsPageProvider() {
+            @Override
             public IDetailsPage getPage(Object key) {
                 if (key instanceof UiElementNode) {
                     return new UiElementDetail(tree);
@@ -761,6 +798,7 @@ public final class UiTreeBlock extends MasterDetailsBlock implements ICommitXml 
                 return null;
             }
 
+            @Override
             public Object getPageKey(Object object) {
                 return object;  // use node object as key
             }

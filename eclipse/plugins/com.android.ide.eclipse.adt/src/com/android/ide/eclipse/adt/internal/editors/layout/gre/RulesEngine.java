@@ -16,108 +16,105 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout.gre;
 
+import static com.android.SdkConstants.ANDROID_WIDGET_PREFIX;
+import static com.android.SdkConstants.VIEW_MERGE;
+import static com.android.SdkConstants.VIEW_TAG;
+
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.ide.common.api.DropFeedback;
+import com.android.ide.common.api.IDragElement;
+import com.android.ide.common.api.IGraphics;
+import com.android.ide.common.api.INode;
+import com.android.ide.common.api.IViewRule;
+import com.android.ide.common.api.InsertType;
+import com.android.ide.common.api.Point;
+import com.android.ide.common.api.Rect;
+import com.android.ide.common.api.RuleAction;
+import com.android.ide.common.api.SegmentType;
+import com.android.ide.common.layout.ViewRule;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.DropFeedback;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IDragElement;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IGraphics;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.INode;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IViewRule;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.Point;
+import com.android.ide.eclipse.adt.internal.editors.AndroidXmlEditor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.layout.descriptors.ViewElementDescriptor;
+import com.android.ide.eclipse.adt.internal.editors.layout.gle2.GCWrapper;
+import com.android.ide.eclipse.adt.internal.editors.layout.gle2.GraphicalEditorPart;
+import com.android.ide.eclipse.adt.internal.editors.layout.gle2.SimpleElement;
 import com.android.ide.eclipse.adt.internal.editors.layout.uimodel.UiViewElementNode;
-import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor;
-import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor.IFolderListener;
-import com.android.sdklib.SdkConstants;
+import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData;
+import com.android.ide.eclipse.adt.internal.sdk.Sdk;
+import com.android.sdklib.IAndroidTarget;
 
-import org.codehaus.groovy.control.CompilationFailedException;
-import org.codehaus.groovy.control.CompilationUnit;
-import org.codehaus.groovy.control.CompilerConfiguration;
-import org.codehaus.groovy.control.Phases;
-import org.codehaus.groovy.control.SourceUnit;
-import org.eclipse.core.resources.IFile;
-import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.IResource;
-import org.eclipse.core.resources.IResourceDelta;
 
-import groovy.lang.GroovyClassLoader;
-import groovy.lang.GroovyCodeSource;
-import groovy.lang.GroovyResourceLoader;
-
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URL;
-import java.nio.charset.Charset;
-import java.security.CodeSource;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
-/* TODO:
- * - create a logger object and pass it around.
- *
- */
-
 /**
- * The rule engine manages the groovy rules files and interacts with them.
+ * The rule engine manages the layout rules and interacts with them.
  * There's one {@link RulesEngine} instance per layout editor.
- * Each instance has 2 sets of scripts: the static ADT rules (shared across all instances)
+ * Each instance has 2 sets of rules: the static ADT rules (shared across all instances)
  * and the project specific rules (local to the current instance / layout editor).
  */
 public class RulesEngine {
-
-    /**
-     * The project folder where the scripts are located.
-     * This is for both our unique ADT project folder and the user projects folders.
-     */
-    private static final String FD_GSCRIPTS = "gscripts";                       //$NON-NLS-1$
-    /**
-     * The extension we expect for the groovy scripts.
-     */
-    private static final String SCRIPT_EXT = ".groovy";                         //$NON-NLS-1$
-    /**
-     * The package we expect for our groovy scripts.
-     * User scripts do not need to use the same (and in fact should probably not.)
-     */
-    private static final String SCRIPT_PACKAGE = "com.android.adt.gscripts";    //$NON-NLS-1$
-
-    private final GroovyClassLoader mClassLoader;
     private final IProject mProject;
     private final Map<Object, IViewRule> mRulesCache = new HashMap<Object, IViewRule>();
-    private ProjectFolderListener mProjectFolderListener;
 
+    /**
+     * The type of any upcoming node manipulations performed by the {@link IViewRule}s.
+     * When actions are performed in the tool (like a paste action, or a drag from palette,
+     * or a drag move within the canvas, etc), these are different types of inserts,
+     * and we don't want to have the rules track them closely (and pass them back to us
+     * in the {@link INode#insertChildAt} methods etc), so instead we track the state
+     * here on behalf of the currently executing rule.
+     */
+    private InsertType mInsertType = InsertType.CREATE;
 
-    public RulesEngine(IProject project) {
+    /**
+     * Per-project loader for custom view rules
+     */
+    private RuleLoader mRuleLoader;
+    private ClassLoader mUserClassLoader;
+
+    /**
+     * The editor which owns this {@link RulesEngine}
+     */
+    private final GraphicalEditorPart mEditor;
+
+    /**
+     * Creates a new {@link RulesEngine} associated with the selected project.
+     * <p/>
+     * The rules engine will look in the project for a tools jar to load custom view rules.
+     *
+     * @param editor the editor which owns this {@link RulesEngine}
+     * @param project A non-null open project.
+     */
+    public RulesEngine(GraphicalEditorPart editor, IProject project) {
         mProject = project;
-        ClassLoader cl = getClass().getClassLoader();
+        mEditor = editor;
 
-        // Note: we could use the CompilerConfiguration to add an output log collector
-        CompilerConfiguration cc = new CompilerConfiguration();
-        cc.setDefaultScriptExtension(SCRIPT_EXT);
+        mRuleLoader = RuleLoader.get(project);
+    }
 
-        mClassLoader = new GreGroovyClassLoader(cl, cc);
+     /**
+     * Returns the {@link IProject} on which the {@link RulesEngine} was created.
+     */
+    public IProject getProject() {
+        return mProject;
+    }
 
-        // Add the project's gscript folder to the classpath, if it exists.
-        IResource f = project.findMember(FD_GSCRIPTS);
-        if ((f instanceof IFolder) && f.exists()) {
-            URI uri = ((IFolder) f).getLocationURI();
-            try {
-                URL url = uri.toURL();
-                mClassLoader.addURL(url);
-            } catch (MalformedURLException e) {
-                // ignore; it's not a valid URL, we obviously won't use it
-                // in the class path.
-            }
-        }
-
-        mProjectFolderListener = new ProjectFolderListener();
-        GlobalProjectMonitor.getMonitor().addFolderListener(
-                mProjectFolderListener,
-                IResourceDelta.ADDED | IResourceDelta.REMOVED | IResourceDelta.CHANGED);
+    /**
+     * Returns the {@link GraphicalEditorPart} for which the {@link RulesEngine} was
+     * created.
+     *
+     * @return the associated editor
+     */
+    public GraphicalEditorPart getEditor() {
+        return mEditor;
     }
 
     /**
@@ -125,19 +122,7 @@ public class RulesEngine {
      * This frees some resources, such as the project's folder monitor.
      */
     public void dispose() {
-        if (mProjectFolderListener != null) {
-            GlobalProjectMonitor.getMonitor().removeFolderListener(mProjectFolderListener);
-            mProjectFolderListener = null;
-        }
         clearCache();
-    }
-
-    /**
-     * Eventually all rules are going to try to load the base android.view.View rule.
-     * Clients can request to preload it to make the first call faster.
-     */
-    public void preloadAndroidView() {
-        loadRule(SdkConstants.CLASS_VIEW, SdkConstants.CLASS_VIEW);
     }
 
     /**
@@ -145,7 +130,7 @@ public class RulesEngine {
      *
      * @param element The view element to target. Can be null.
      * @return Null if the rule failed, there's no rule or the rule does not want to override
-     *   the display name. Otherwise, a string as returned by the groovy script.
+     *   the display name. Otherwise, a string as returned by the rule.
      */
     public String callGetDisplayName(UiViewElementNode element) {
         // try to find a rule for this element's FQCN
@@ -156,7 +141,7 @@ public class RulesEngine {
                 return rule.getDisplayName();
 
             } catch (Exception e) {
-                logError("%s.getDisplayName() failed: %s",
+                AdtPlugin.log(e, "%s.getDisplayName() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
@@ -166,55 +151,132 @@ public class RulesEngine {
     }
 
     /**
-     * Invokes {@link IViewRule#onSelected(IGraphics, INode, String, boolean)}
-     * on the rule matching the specified element.
+     * Invokes {@link IViewRule#addContextMenuActions(List, INode)} on the rule matching the specified element.
      *
-     * @param gc An {@link IGraphics} instance, to perform drawing operations.
      * @param selectedNode The node selected. Never null.
-     * @param displayName The name to display, as returned by {@link IViewRule#getDisplayName()}.
-     * @param isMultipleSelection A boolean set to true if more than one element is selected.
+     * @return Null if the rule failed, there's no rule or the rule does not provide
+     *   any custom menu actions. Otherwise, a list of {@link RuleAction}.
      */
-    public void callOnSelected(IGraphics gc, NodeProxy selectedNode,
-            String displayName, boolean isMultipleSelection) {
+    @Nullable
+    public List<RuleAction> callGetContextMenu(NodeProxy selectedNode) {
         // try to find a rule for this element's FQCN
         IViewRule rule = loadRule(selectedNode.getNode());
 
         if (rule != null) {
             try {
-                rule.onSelected(gc, selectedNode, displayName, isMultipleSelection);
+                mInsertType = InsertType.CREATE;
+                List<RuleAction> actions = new ArrayList<RuleAction>();
+                rule.addContextMenuActions(actions, selectedNode);
+                Collections.sort(actions);
 
+                return actions;
             } catch (Exception e) {
-                logError("%s.onSelected() failed: %s",
+                AdtPlugin.log(e, "%s.getContextMenu() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
         }
+
+        return null;
     }
 
     /**
-     * Invokes {@link IViewRule#onChildSelected(IGraphics, INode, INode)}
-     * on the rule matching the specified element.
+     * Calls the selected node to return its default action
      *
-     * @param gc An {@link IGraphics} instance, to perform drawing operations.
-     * @param parentNode The parent of the node selected. Never null.
-     * @param childNode The child node that was selected. Never null.
+     * @param selectedNode the node to apply the action to
+     * @return the default action id
      */
-    public void callOnChildSelected(IGraphics gc, NodeProxy parentNode, NodeProxy childNode) {
+    public String callGetDefaultActionId(@NonNull NodeProxy selectedNode) {
+        // try to find a rule for this element's FQCN
+        IViewRule rule = loadRule(selectedNode.getNode());
+
+        if (rule != null) {
+            try {
+                mInsertType = InsertType.CREATE;
+                return rule.getDefaultActionId(selectedNode);
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.getDefaultAction() failed: %s",
+                        rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Invokes {@link IViewRule#addLayoutActions(List, INode, List)} on the rule
+     * matching the specified element.
+     *
+     * @param actions The list of actions to add layout actions into
+     * @param parentNode The layout node
+     * @param children The selected children of the node, if any (used to
+     *            initialize values of child layout controls, if applicable)
+     * @return Null if the rule failed, there's no rule or the rule does not
+     *         provide any custom menu actions. Otherwise, a list of
+     *         {@link RuleAction}.
+     */
+    public List<RuleAction> callAddLayoutActions(List<RuleAction> actions,
+            NodeProxy parentNode, List<NodeProxy> children ) {
         // try to find a rule for this element's FQCN
         IViewRule rule = loadRule(parentNode.getNode());
 
         if (rule != null) {
             try {
-                rule.onChildSelected(gc, parentNode, childNode);
+                mInsertType = InsertType.CREATE;
+                rule.addLayoutActions(actions, parentNode, children);
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.getContextMenu() failed: %s",
+                        rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Invokes {@link IViewRule#getSelectionHint(INode, INode)}
+     * on the rule matching the specified element.
+     *
+     * @param parentNode The parent of the node selected. Never null.
+     * @param childNode The child node that was selected. Never null.
+     * @return a list of strings to be displayed, or null or empty to display nothing
+     */
+    public List<String> callGetSelectionHint(NodeProxy parentNode, NodeProxy childNode) {
+        // try to find a rule for this element's FQCN
+        IViewRule rule = loadRule(parentNode.getNode());
+
+        if (rule != null) {
+            try {
+                return rule.getSelectionHint(parentNode, childNode);
 
             } catch (Exception e) {
-                logError("%s.onChildSelected() failed: %s",
+                AdtPlugin.log(e, "%s.getSelectionHint() failed: %s",
+                        rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+
+        return null;
+    }
+
+    public void callPaintSelectionFeedback(GCWrapper gcWrapper, NodeProxy parentNode,
+            List<? extends INode> childNodes, Object view) {
+        // try to find a rule for this element's FQCN
+        IViewRule rule = loadRule(parentNode.getNode());
+
+        if (rule != null) {
+            try {
+                rule.paintSelectionFeedback(gcWrapper, parentNode, childNodes, view);
+
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.callPaintSelectionFeedback() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
         }
     }
-
 
     /**
      * Called when the d'n'd starts dragging over the target node.
@@ -223,16 +285,16 @@ public class RulesEngine {
      * Followed by a paint.
      */
     public DropFeedback callOnDropEnter(NodeProxy targetNode,
-            IDragElement[] elements) {
+            Object targetView, IDragElement[] elements) {
         // try to find a rule for this element's FQCN
         IViewRule rule = loadRule(targetNode.getNode());
 
         if (rule != null) {
             try {
-                return rule.onDropEnter(targetNode, elements);
+                return rule.onDropEnter(targetNode, targetView, elements);
 
             } catch (Exception e) {
-                logError("%s.onDropEnter() failed: %s",
+                AdtPlugin.log(e, "%s.onDropEnter() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
@@ -258,7 +320,7 @@ public class RulesEngine {
                 return rule.onDropMove(targetNode, elements, feedback, where);
 
             } catch (Exception e) {
-                logError("%s.onDropMove() failed: %s",
+                AdtPlugin.log(e, "%s.onDropMove() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
@@ -281,7 +343,7 @@ public class RulesEngine {
                 rule.onDropLeave(targetNode, elements, feedback);
 
             } catch (Exception e) {
-                logError("%s.onDropLeave() failed: %s",
+                AdtPlugin.log(e, "%s.onDropLeave() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
@@ -294,16 +356,18 @@ public class RulesEngine {
     public void callOnDropped(NodeProxy targetNode,
             IDragElement[] elements,
             DropFeedback feedback,
-            Point where) {
+            Point where,
+            InsertType insertType) {
         // try to find a rule for this element's FQCN
         IViewRule rule = loadRule(targetNode.getNode());
 
         if (rule != null) {
             try {
+                mInsertType = insertType;
                 rule.onDropped(targetNode, elements, feedback, where);
 
             } catch (Exception e) {
-                logError("%s.onDropped() failed: %s",
+                AdtPlugin.log(e, "%s.onDropped() failed: %s",
                         rule.getClass().getSimpleName(),
                         e.toString());
             }
@@ -312,31 +376,243 @@ public class RulesEngine {
 
     /**
      * Called when a paint has been requested via DropFeedback.
-     * @param targetNode
      */
     public void callDropFeedbackPaint(IGraphics gc,
             NodeProxy targetNode,
             DropFeedback feedback) {
-        if (gc != null && feedback != null && feedback.paintClosure != null) {
+        if (gc != null && feedback != null && feedback.painter != null) {
             try {
-                feedback.paintClosure.call(new Object[] { gc, targetNode, feedback });
+                feedback.painter.paint(gc, targetNode, feedback);
             } catch (Exception e) {
-                logError("DropFeedback.paintClosure failed: %s",
+                AdtPlugin.log(e, "DropFeedback.painter failed: %s",
                         e.toString());
+            }
+        }
+    }
+
+    /**
+     * Called when pasting elements in an existing document on the selected target.
+     *
+     * @param targetNode The first node selected.
+     * @param targetView The view object for the target node, or null if not known
+     * @param pastedElements The elements being pasted.
+     * @return the parent node the paste was applied into
+     */
+    public NodeProxy callOnPaste(NodeProxy targetNode, Object targetView,
+            SimpleElement[] pastedElements) {
+
+        // Find a target which accepts children. If you for example select a button
+        // and attempt to paste, this will reselect the parent of the button as the paste
+        // target. (This is a loop rather than just checking the direct parent since
+        // we will soon ask each child whether they are *willing* to accept the new child.
+        // A ScrollView for example, which only accepts one child, might also say no
+        // and delegate to its parent in turn.
+        INode parent = targetNode;
+        while (parent instanceof NodeProxy) {
+            NodeProxy np = (NodeProxy) parent;
+            if (np.getNode() != null && np.getNode().getDescriptor() != null) {
+                ElementDescriptor descriptor = np.getNode().getDescriptor();
+                if (descriptor.hasChildren()) {
+                    targetNode = np;
+                    break;
+                }
+            }
+            parent = parent.getParent();
+        }
+
+        // try to find a rule for this element's FQCN
+        IViewRule rule = loadRule(targetNode.getNode());
+
+        if (rule != null) {
+            try {
+                mInsertType = InsertType.PASTE;
+                rule.onPaste(targetNode, targetView, pastedElements);
+
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.onPaste() failed: %s",
+                        rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+
+        return targetNode;
+    }
+
+    // ---- Resize operations ----
+
+    public DropFeedback callOnResizeBegin(NodeProxy child, NodeProxy parent, Rect newBounds,
+            SegmentType horizontalEdge, SegmentType verticalEdge, Object childView,
+            Object parentView) {
+        IViewRule rule = loadRule(parent.getNode());
+
+        if (rule != null) {
+            try {
+                return rule.onResizeBegin(child, parent, horizontalEdge, verticalEdge,
+                        childView, parentView);
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.onResizeBegin() failed: %s", rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+
+        return null;
+    }
+
+    public void callOnResizeUpdate(DropFeedback feedback, NodeProxy child, NodeProxy parent,
+            Rect newBounds, int modifierMask) {
+        IViewRule rule = loadRule(parent.getNode());
+
+        if (rule != null) {
+            try {
+                rule.onResizeUpdate(feedback, child, parent, newBounds, modifierMask);
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.onResizeUpdate() failed: %s", rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+    }
+
+    public void callOnResizeEnd(DropFeedback feedback, NodeProxy child, NodeProxy parent,
+            Rect newBounds) {
+        IViewRule rule = loadRule(parent.getNode());
+
+        if (rule != null) {
+            try {
+                rule.onResizeEnd(feedback, child, parent, newBounds);
+            } catch (Exception e) {
+                AdtPlugin.log(e, "%s.onResizeEnd() failed: %s", rule.getClass().getSimpleName(),
+                        e.toString());
+            }
+        }
+    }
+
+    // ---- Creation customizations ----
+
+    /**
+     * Invokes the create hooks ({@link IViewRule#onCreate},
+     * {@link IViewRule#onChildInserted} when a new child has been created/pasted/moved, and
+     * is inserted into a given parent. The parent may be null (for example when rendering
+     * top level items for preview).
+     *
+     * @param editor the XML editor to apply edits to the model for (performed by view
+     *            rules)
+     * @param parentNode the parent XML node, or null if unknown
+     * @param childNode the XML node of the new node, never null
+     * @param overrideInsertType If not null, specifies an explicit insert type to use for
+     *            edits made during the customization
+     */
+    public void callCreateHooks(
+        AndroidXmlEditor editor,
+        NodeProxy parentNode, NodeProxy childNode,
+        InsertType overrideInsertType) {
+        IViewRule parentRule = null;
+
+        if (parentNode != null) {
+            UiViewElementNode parentUiNode = parentNode.getNode();
+            parentRule = loadRule(parentUiNode);
+        }
+
+        if (overrideInsertType != null) {
+            mInsertType = overrideInsertType;
+        }
+
+        UiViewElementNode newUiNode = childNode.getNode();
+        IViewRule childRule = loadRule(newUiNode);
+        if (childRule != null || parentRule != null) {
+            callCreateHooks(editor, mInsertType, parentRule, parentNode,
+                    childRule, childNode);
+        }
+    }
+
+    private static void callCreateHooks(
+            final AndroidXmlEditor editor, final InsertType insertType,
+            final IViewRule parentRule, final INode parentNode,
+            final IViewRule childRule, final INode newNode) {
+        // Notify the parent about the new child in case it wants to customize it
+        // (For example, a ScrollView parent can go and set all its children's layout params to
+        // fill the parent.)
+        if (!editor.isEditXmlModelPending()) {
+            editor.wrapEditXmlModel(new Runnable() {
+                @Override
+                public void run() {
+                    callCreateHooks(editor, insertType,
+                            parentRule, parentNode, childRule, newNode);
+                }
+            });
+            return;
+        }
+
+        if (parentRule != null) {
+            parentRule.onChildInserted(newNode, parentNode, insertType);
+        }
+
+        // Look up corresponding IViewRule, and notify the rule about
+        // this create action in case it wants to customize the new object.
+        // (For example, a rule for TabHosts can go and create a default child tab
+        // when you create it.)
+        if (childRule != null) {
+            childRule.onCreate(newNode, parentNode, insertType);
+        }
+
+        if (parentNode != null) {
+            ((NodeProxy) parentNode).applyPendingChanges();
+        }
+    }
+
+    /**
+     * Set the type of insert currently in progress
+     *
+     * @param insertType the insert type to use for the next operation
+     */
+    public void setInsertType(InsertType insertType) {
+        mInsertType = insertType;
+    }
+
+    /**
+     * Return the type of insert currently in progress
+     *
+     * @return the type of insert currently in progress
+     */
+    public InsertType getInsertType() {
+        return mInsertType;
+    }
+
+    // ---- Deletion ----
+
+    public void callOnRemovingChildren(NodeProxy parentNode,
+            List<INode> children) {
+        if (parentNode != null) {
+            UiViewElementNode parentUiNode = parentNode.getNode();
+            IViewRule parentRule = loadRule(parentUiNode);
+            if (parentRule != null) {
+                try {
+                    parentRule.onRemovingChildren(children, parentNode,
+                            mInsertType == InsertType.MOVE_WITHIN);
+                } catch (Exception e) {
+                    AdtPlugin.log(e, "%s.onDispose() failed: %s",
+                            parentRule.getClass().getSimpleName(),
+                            e.toString());
+                }
             }
         }
     }
 
     // ---- private ---
 
-    private class ProjectFolderListener implements IFolderListener {
-        public void folderChanged(IFolder folder, int kind) {
-            if (folder.getProject() == mProject &&
-                    FD_GSCRIPTS.equals(folder.getName())) {
-                // Clear our whole rules cache, to not have to deal with dependencies.
-                clearCache();
+    /**
+     * Returns the descriptor for the base View class.
+     * This could be null if the SDK or the given platform target hasn't loaded yet.
+     */
+    private ViewElementDescriptor getBaseViewDescriptor() {
+        Sdk currentSdk = Sdk.getCurrent();
+        if (currentSdk != null) {
+            IAndroidTarget target = currentSdk.getTarget(mProject);
+            if (target != null) {
+                AndroidTargetData data = currentSdk.getTargetData(target);
+                return data.getLayoutDescriptors().getBaseViewDescriptor();
             }
         }
+        return null;
     }
 
     /**
@@ -355,12 +631,37 @@ public class RulesEngine {
                 try {
                     rule.onDispose();
                 } catch (Exception e) {
-                    logError("%s.onDispose() failed: %s",
+                    AdtPlugin.log(e, "%s.onDispose() failed: %s",
                             rule.getClass().getSimpleName(),
                             e.toString());
                 }
             }
         }
+    }
+
+    /**
+     * Checks whether the project class loader has changed, and if so
+     * unregisters any view rules that use classes from the old class loader. It
+     * then returns the class loader to be used.
+     */
+    private ClassLoader updateClassLoader() {
+        ClassLoader classLoader = mRuleLoader.getClassLoader();
+        if (mUserClassLoader != null && classLoader != mUserClassLoader) {
+            // We have to unload all the IViewRules from the old class
+            List<Object> dispose = new ArrayList<Object>();
+            for (Map.Entry<Object, IViewRule> entry : mRulesCache.entrySet()) {
+                IViewRule rule = entry.getValue();
+                if (rule.getClass().getClassLoader() == mUserClassLoader) {
+                    dispose.add(entry.getKey());
+                }
+            }
+            for (Object object : dispose) {
+                mRulesCache.remove(object);
+            }
+        }
+
+        mUserClassLoader = classLoader;
+        return mUserClassLoader;
     }
 
     /**
@@ -371,16 +672,25 @@ public class RulesEngine {
     private IViewRule loadRule(UiViewElementNode element) {
         if (element == null) {
             return null;
-        } else {
-            // sanity check. this can't fail.
-            ElementDescriptor d = element.getDescriptor();
-            if (d == null || !(d instanceof ViewElementDescriptor)) {
-                return null;
-            }
         }
 
         String targetFqcn = null;
-        ViewElementDescriptor targetDesc = (ViewElementDescriptor) element.getDescriptor();
+        ViewElementDescriptor targetDesc = null;
+
+        ElementDescriptor d = element.getDescriptor();
+        if (d instanceof ViewElementDescriptor) {
+            targetDesc = (ViewElementDescriptor) d;
+        }
+        if (d == null || !(d instanceof ViewElementDescriptor)) {
+            // This should not happen. All views should have some kind of *view* element
+            // descriptor. Maybe the project is not complete and doesn't build or something.
+            // In this case, we'll use the descriptor of the base android View class.
+            targetDesc = getBaseViewDescriptor();
+        }
+
+        // Check whether any of the custom view .jar files have changed and if so
+        // unregister previously cached view rules to force a new view rule to be loaded.
+        updateClassLoader();
 
         // Return the rule if we find it in the cache, even if it was stored as null
         // (which means we didn't find it earlier, so don't look for it again)
@@ -397,6 +707,7 @@ public class RulesEngine {
             // Get the FQCN of this View
             String fqcn = desc.getFullClassName();
             if (fqcn == null) {
+                // Shouldn't be happening.
                 return null;
             }
 
@@ -405,6 +716,13 @@ public class RulesEngine {
             // target FQCN remains constant.
             if (targetFqcn == null) {
                 targetFqcn = fqcn;
+            }
+
+            if (fqcn.indexOf('.') == -1) {
+                // Deal with unknown descriptors; these lack the full qualified path and
+                // elements in the layout without a package are taken to be in the
+                // android.widget package.
+                fqcn = ANDROID_WIDGET_PREFIX + fqcn;
             }
 
             // Try to find a rule matching the "real" FQCN. If we find it, we're done.
@@ -429,15 +747,15 @@ public class RulesEngine {
      * Once a rule is found (or not), it is stored in a cache using its target FQCN
      * so we don't try to reload it.
      * <p/>
-     * The real FQCN is the actual groovy filename we're loading, e.g. "android.view.View.groovy"
+     * The real FQCN is the actual rule class we're loading, e.g. "android.view.View"
      * where target FQCN is the class we were initially looking for, which might be the same as
      * the real FQCN or might be a derived class, e.g. "android.widget.TextView".
      *
-     * @param realFqcn The FQCN of the groovy rule actually being loaded.
+     * @param realFqcn The FQCN of the rule class actually being loaded.
      * @param targetFqcn The FQCN of the class actually processed, which might be different from
      *          the FQCN of the rule being loaded.
      */
-    private IViewRule loadRule(String realFqcn, String targetFqcn) {
+    IViewRule loadRule(String realFqcn, String targetFqcn) {
         if (realFqcn == null || targetFqcn == null) {
             return null;
         }
@@ -449,37 +767,71 @@ public class RulesEngine {
             return rule;
         }
 
-        // Look for the file in ADT first.
-        // That means a project can't redefine any of the rules we define.
-        String filename = realFqcn + SCRIPT_EXT;
-
+        // Look for class via reflection
         try {
-            InputStream is = AdtPlugin.readEmbeddedFileAsStream(
-                    FD_GSCRIPTS + AndroidConstants.WS_SEP + filename);
-            rule = loadStream(is, realFqcn, "ADT");     //$NON-NLS-1$
-            if (rule != null) {
-                return initializeRule(rule, targetFqcn);
-            }
-        } catch (Exception e) {
-            logError("load rule error (%s): %s", filename, e.toString());
-        }
-
-
-        // Then look for the file in the project
-        IResource r = mProject.findMember(FD_GSCRIPTS);
-        if (r != null && r.getType() == IResource.FOLDER) {
-            r = ((IFolder) r).findMember(filename);
-            if (r != null && r.getType() == IResource.FILE) {
-                try {
-                    InputStream is = ((IFile) r).getContents();
-                    rule = loadStream(is, realFqcn, mProject.getName());
-                    if (rule != null) {
-                        return initializeRule(rule, targetFqcn);
+            // For now, we package view rules for the builtin Android views and
+            // widgets with the tool in a special package, so look there rather
+            // than in the same package as the widgets.
+            String ruleClassName;
+            ClassLoader classLoader;
+            if (realFqcn.startsWith("android.") || //$NON-NLS-1$
+                    realFqcn.equals(VIEW_MERGE) ||
+                    realFqcn.endsWith(".GridLayout") || //$NON-NLS-1$ // Temporary special case
+                    // FIXME: Remove this special case as soon as we pull
+                    // the MapViewRule out of this code base and bundle it
+                    // with the add ons
+                    realFqcn.startsWith("com.google.android.maps.")) { //$NON-NLS-1$
+                // This doesn't handle a case where there are name conflicts
+                // (e.g. where there are multiple different views with the same
+                // class name and only differing in package names, but that's a
+                // really bad practice in the first place, and if that situation
+                // should come up in the API we can enhance this algorithm.
+                String packageName = ViewRule.class.getName();
+                packageName = packageName.substring(0, packageName.lastIndexOf('.'));
+                classLoader = RulesEngine.class.getClassLoader();
+                int dotIndex = realFqcn.lastIndexOf('.');
+                String baseName = realFqcn.substring(dotIndex+1);
+                // Capitalize rule class name to match naming conventions, if necessary (<merge>)
+                if (Character.isLowerCase(baseName.charAt(0))) {
+                    if (baseName.equals(VIEW_TAG)) {
+                        // Hack: ViewRule is generic for the "View" class, so we can't use it
+                        // for the special XML "view" tag (lowercase); instead, the rule is
+                        // named "ViewTagRule" instead.
+                        baseName = "ViewTag"; //$NON-NLS-1$
                     }
-                } catch (Exception e) {
-                    logError("load rule error (%s): %s", filename, e.getMessage());
+                    baseName = Character.toUpperCase(baseName.charAt(0)) + baseName.substring(1);
                 }
+                ruleClassName = packageName + "." + //$NON-NLS-1$
+                    baseName + "Rule"; //$NON-NLS-1$
+            } else {
+                // Initialize the user-classpath for 3rd party IViewRules, if necessary
+                classLoader = updateClassLoader();
+                if (classLoader == null) {
+                    // The mUserClassLoader can be null; this is the typical scenario,
+                    // when the user is only using builtin layout rules.
+                    // This means however we can't resolve this fqcn since it's not
+                    // in the name space of the builtin rules.
+                    mRulesCache.put(realFqcn, null);
+                    return null;
+                }
+
+                // For other (3rd party) widgets, look in the same package (though most
+                // likely not in the same jar!)
+                ruleClassName = realFqcn + "Rule"; //$NON-NLS-1$
             }
+
+            Class<?> clz = Class.forName(ruleClassName, true, classLoader);
+            rule = (IViewRule) clz.newInstance();
+            return initializeRule(rule, targetFqcn);
+        } catch (ClassNotFoundException ex) {
+            // Not an unexpected error - this means that there isn't a helper for this
+            // class.
+        } catch (InstantiationException e) {
+            // This is NOT an expected error: fail.
+            AdtPlugin.log(e, "load rule error (%s): %s", realFqcn, e.toString());
+        } catch (IllegalAccessException e) {
+            // This is NOT an expected error: fail.
+            AdtPlugin.log(e, "load rule error (%s): %s", realFqcn, e.toString());
         }
 
         // Memorize in the cache that we couldn't find a rule for this real FQCN
@@ -494,7 +846,7 @@ public class RulesEngine {
      * Contract: the rule is not in the {@link #mRulesCache} yet and this method will
      * cache it using the target FQCN if the rule is accepted.
      * <p/>
-     * The real FQCN is the actual groovy filename we're loading, e.g. "android.view.View.groovy"
+     * The real FQCN is the actual rule class we're loading, e.g. "android.view.View"
      * where target FQCN is the class we were initially looking for, which might be the same as
      * the real FQCN or might be a derived class, e.g. "android.widget.TextView".
      *
@@ -506,7 +858,7 @@ public class RulesEngine {
     private IViewRule initializeRule(IViewRule rule, String targetFqcn) {
 
         try {
-            if (rule.onInitialize(targetFqcn)) {
+            if (rule.onInitialize(targetFqcn, new ClientRulesEngine(this, targetFqcn))) {
                 // Add it to the cache and return it
                 mRulesCache.put(targetFqcn, rule);
                 return rule;
@@ -514,136 +866,11 @@ public class RulesEngine {
                 rule.onDispose();
             }
         } catch (Exception e) {
-            logError("%s.onInit() failed: %s",
+            AdtPlugin.log(e, "%s.onInit() failed: %s",
                     rule.getClass().getSimpleName(),
                     e.toString());
         }
 
         return null;
     }
-
-    /**
-     * Actually load a groovy script and instantiate an {@link IViewRule} from it.
-     * On error, outputs (hopefully meaningful) groovy error messages.
-     *
-     * @param is The input stream for the groovy script. Can be null.
-     * @param fqcn The class name, for display purposes only.
-     * @param codeBase A string eventually passed to {@link CodeSource} to define some kind
-     *                 of security permission. Quite irrelevant in our case since it all
-     *                 comes from an input stream. However this method uses it to print
-     *                 the origin of the source in the exception errors.
-     * @return A new {@link IViewRule} or null if loading failed for any reason.
-     */
-    private IViewRule loadStream(InputStream is, String fqcn, String codeBase) {
-        try {
-            if (is == null) {
-                // We handle this case for convenience. It typically means that the
-                // input stream couldn't be opened because the file was not found.
-                // Since we expect this to be a common case, we don't log it as an error.
-                return null;
-            }
-
-            // We don't really now the character encoding, we're going to assume UTF-8.
-            InputStreamReader reader = new InputStreamReader(is, Charset.forName("UTF-8"));
-            GroovyCodeSource source = new GroovyCodeSource(reader, fqcn, codeBase);
-
-            // Create a groovy class from it. Can fail to compile.
-            Class<?> c = mClassLoader.parseClass(source);
-
-            // Get an instance. This might throw ClassCastException.
-            return (IViewRule) c.newInstance();
-
-        } catch (CompilationFailedException e) {
-            logError("Compilation error in %1$s:%2$s.groovy: %3$s", codeBase, fqcn, e.toString());
-        } catch (ClassCastException e) {
-            logError("Script %1$s:%2$s.groovy does not implement IViewRule", codeBase, fqcn);
-        } catch (Exception e) {
-            logError("Failed to use %1$s:%2$s.groovy: %3$s", codeBase, fqcn, e.toString());
-        }
-
-        return null;
-    }
-
-    private void logError(String format, Object...params) {
-        String s = String.format(format, params);
-        AdtPlugin.printErrorToConsole(mProject, s);
-    }
-
-    // -----
-
-    /**
-     * A custom {@link GroovyClassLoader} that lets us override the {@link CompilationUnit}
-     * and the {@link GroovyResourceLoader}.
-     */
-    private static class GreGroovyClassLoader extends GroovyClassLoader {
-
-        public GreGroovyClassLoader(ClassLoader cl, CompilerConfiguration cc) {
-            super(cl, cc);
-
-            // Override the resource loader: when a class is not found, we try to find a class
-            // defined in our internal ADT groovy script, assuming it has our special package.
-            // Note that these classes do not have to implement IViewRule. That means we can
-            // create utility classes in groovy used by the other groovy rules.
-            final GroovyResourceLoader resLoader = getResourceLoader();
-            setResourceLoader(new GroovyResourceLoader() {
-                public URL loadGroovySource(String filename) throws MalformedURLException {
-                    URL url = resLoader.loadGroovySource(filename);
-                    if (url == null) {
-                        // We only try to load classes in our own groovy script package
-                        String p = SCRIPT_PACKAGE + ".";      //$NON-NLS-1$
-
-                        if (filename.startsWith(p)) {
-                            filename = filename.substring(p.length());
-
-                            // This will return null if the file doesn't exists.
-                            // The groovy resolver will actually load and verify the class
-                            // implemented matches the one it was expecting in the first place,
-                            // so we don't have anything to do here besides returning the URL to
-                            // the source file.
-                            url = AdtPlugin.getEmbeddedFileUrl(
-                                    AndroidConstants.WS_SEP +
-                                    FD_GSCRIPTS +
-                                    AndroidConstants.WS_SEP +
-                                    filename +
-                                    SCRIPT_EXT);
-                        }
-                    }
-                    return url;
-                }
-            });
-        }
-
-        @Override
-        protected CompilationUnit createCompilationUnit(
-                CompilerConfiguration config,
-                CodeSource source) {
-            return new GreCompilationUnit(config, source, this);
-        }
-    }
-
-    /**
-     * A custom {@link CompilationUnit} that lets us add default import for our base classes
-     * using the base package of {@link IViewRule} (e.g. "import com.android...gscripts.*")
-     */
-    private static class GreCompilationUnit extends CompilationUnit {
-
-        public GreCompilationUnit(
-                CompilerConfiguration config,
-                CodeSource source,
-                GroovyClassLoader loader) {
-            super(config, source, loader);
-
-            SourceUnitOperation op = new SourceUnitOperation() {
-                @Override
-                public void call(SourceUnit source) throws CompilationFailedException {
-                    // add the equivalent of "import com.android...gscripts.*" to the source.
-                    String p = IViewRule.class.getPackage().getName();
-                    source.getAST().addStarImport(p + ".");  //$NON-NLS-1$
-                }
-            };
-
-            addPhaseOperation(op, Phases.CONVERSION);
-        }
-    }
-
 }

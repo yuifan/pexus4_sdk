@@ -16,22 +16,35 @@
 
 package com.android.ide.eclipse.adt.internal.editors.manifest.descriptors;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
+import com.android.ide.common.api.IAttributeInfo;
+import com.android.ide.eclipse.adt.internal.editors.descriptors.DescriptorsUtils;
+import com.android.ide.eclipse.adt.internal.editors.descriptors.ITextAttributeCreator;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiResourceAttributeNode;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
+import com.android.resources.ResourceType;
 
 /**
  * Describes a Theme/Style XML attribute displayed by a {@link UiResourceAttributeNode}
- * @deprecated Does not seem used anymore. Cleanup later.
+ * <p/>
+ * Used by the override for .../theme in {@link AndroidManifestDescriptors}.
  */
 public final class ThemeAttributeDescriptor extends TextAttributeDescriptor {
 
-    public ThemeAttributeDescriptor(String xmlLocalName, String uiName, String nsUri,
-            String tooltip, IAttributeInfo attrInfo) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+    /**
+     * Used by {@link DescriptorsUtils} to create instances of this descriptor.
+     */
+    public static final ITextAttributeCreator CREATOR = new ITextAttributeCreator() {
+        @Override
+        public TextAttributeDescriptor create(String xmlLocalName,
+                String nsUri, IAttributeInfo attrInfo) {
+            return new ThemeAttributeDescriptor(xmlLocalName, nsUri, attrInfo);
+        }
+    };
+
+    public ThemeAttributeDescriptor(String xmlLocalName, String nsUri, IAttributeInfo attrInfo) {
+        super(xmlLocalName, nsUri, attrInfo);
     }
 
     /**

@@ -6,7 +6,7 @@
 # $2: Optional build number. If present, will be appended to the date qualifier.
 #     The build number cannot contain spaces *nor* periods (dashes are ok.)
 # -z: Optional, prevents the final zip and leaves the udate-site directory intact.
-# -i: Optional, if present, the Google internal update site will be built. Otherwise, 
+# -i: Optional, if present, the Google internal update site will be built. Otherwise,
 #     the external site will be built
 # Workflow:
 # - make dx, ddms, ping
@@ -18,10 +18,13 @@
 
 set -e  # Fail this script as soon as a command fails -- fail early, fail fast
 
+PROG_DIR=$(dirname "$0")
+
 DEST_DIR=""
 BUILD_NUMBER=""
 CREATE_ZIP="1"
 INTERNAL_BUILD=""
+ADT_PREVIEW="preview"   # "preview" for preview builds, "" for final release builds.
 
 function get_params() {
   # parse input parameters
@@ -48,44 +51,41 @@ function die() {
 function check_params() {
   # This needs to run from the top android directory
   # Automatically CD to the top android directory, whatever its name
-  D=`dirname "$0"`
+  D="$PROG_DIR"
   cd "$D/../../../" && echo "Switched to directory $PWD"
 
   # The current Eclipse build has some Linux dependency in its config files
-  [ `uname` == "Linux" ] || die "This must run from a Linux box."
+  [ `uname` == "Linux" -o `uname` == "Darwin" ] || die "This must run from a Linux or Mac OSX box."
 
   # Check dest dir exists
   [ -n "$DEST_DIR" ] || die "Usage: $0 <destination-directory> [build-number]"
   [ -d "$DEST_DIR" ] || die "Destination directory $DEST_DIR must exist."
-}
 
-function build_libs() {
-  MAKE_OPT="-j8"
-  echo "*** Building: make $MAKE_OPT dx ping ddms androidprefs groovy-all-1.7.0 layoutlib layoutlib_api layoutlib_utils ninepatch sdklib sdkuilib"
-  make $MAKE_OPT dx ping ddms androidprefs groovy-all-1.7.0 layoutlib layoutlib_api layoutlib_utils ninepatch sdklib sdkuilib
-}
-
-function build_plugin {
-  sdk/eclipse/scripts/create_all_symlinks.sh
-
-  # Qualifier is "v" followed by date/time in YYYYMMDDHHSS format and the optional
-  # build number.
+  # Qualifier is "v" followed by date/time in YYYYMMDDHHSS format, an optional "preview"
+  # tag and the optional build number.
   DATE=`date +v%Y%m%d%H%M`
-  QUALIFIER="$DATE"
+  QUALIFIER="${DATE}-$ADT_PREVIEW"
   [ -n "$BUILD_NUMBER" ] && QUALIFIER="${QUALIFIER}-${BUILD_NUMBER}"
+
+  return 0
+}
+
+function build_plugin() {
+  sdk/eclipse/scripts/create_all_symlinks.sh
 
   # Compute the final directory name and remove any leftovers from previous
   # runs if any.
-  BUILD_PREFIX="android-eclipse"  
+  BUILD_PREFIX="android-eclipse"
   if [ "$INTERNAL_BUILD" ]; then
-    # append 'eng' signifier to end of archive name to denote internal build
+    # append 'eng' qualifier to end of archive name to denote internal build
     BUILD_PREFIX="${BUILD_PREFIX}-eng"
-  fi  
+  fi
 
   # exclude date from build-zip name so it can be auto-calculated by continuous
   # test process unless there's no build number, in which case the date is
   # still used (useful for testing)
-  ZIP_NAME="${BUILD_PREFIX}-${BUILD_NUMBER:-$DATE}.zip"
+  local preview="${ADT_PREVIEW:+-}${ADT_PREVIEW}"
+  ZIP_NAME="${BUILD_PREFIX}${preview}-${BUILD_NUMBER:-$DATE}.zip"
   [ -d "$DEST_DIR/$BUILD_PREFIX" ] || rm -rfv "$DEST_DIR/$BUILD_PREFIX"
 
   # Perform the Eclipse build and move the result in $DEST_DIR/android-build
@@ -112,7 +112,25 @@ function build_plugin {
   fi
 }
 
+function build_adt_ide() {
+  local preview="${ADT_PREVIEW}${ADT_PREVIEW:+-}"
+  if [[ -z $INTERNAL_BUILD ]]; then
+    # This needs to run from the top android directory
+    D="$PROG_DIR"
+    cd "$D/../../../" && echo "Switched to directory $PWD"
+    for sc in */*/*/build_ide*.sh; do
+      if [[ -x $sc ]]; then
+        echo "RUNNING $sc from $PWD"
+        $sc "$DEST_DIR" "$QUALIFIER" "${preview}${BUILD_NUMBER:-$QUALIFIER}"
+      else
+        echo "WARNING: skipping non-exec $sc script"
+      fi
+    done
+  fi
+}
+
 get_params "$@"
 check_params
-build_libs
-build_plugin
+( build_plugin )
+( build_adt_ide )
+

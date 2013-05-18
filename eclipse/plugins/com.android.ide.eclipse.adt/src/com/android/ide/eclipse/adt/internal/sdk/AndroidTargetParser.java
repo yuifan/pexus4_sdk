@@ -16,24 +16,23 @@
 
 package com.android.ide.eclipse.adt.internal.sdk;
 
+import com.android.SdkConstants;
+import com.android.ide.common.rendering.LayoutLibrary;
+import com.android.ide.common.resources.ResourceRepository;
+import com.android.ide.common.resources.platform.AttrsXmlParser;
+import com.android.ide.common.resources.platform.DeclareStyleableInfo;
+import com.android.ide.common.resources.platform.ViewClassInfo;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
+import com.android.ide.eclipse.adt.internal.editors.animator.AnimDescriptors;
+import com.android.ide.eclipse.adt.internal.editors.animator.AnimatorDescriptors;
+import com.android.ide.eclipse.adt.internal.editors.color.ColorDescriptors;
+import com.android.ide.eclipse.adt.internal.editors.drawable.DrawableDescriptors;
 import com.android.ide.eclipse.adt.internal.editors.layout.descriptors.LayoutDescriptors;
 import com.android.ide.eclipse.adt.internal.editors.manifest.descriptors.AndroidManifestDescriptors;
 import com.android.ide.eclipse.adt.internal.editors.menu.descriptors.MenuDescriptors;
-import com.android.ide.eclipse.adt.internal.editors.xml.descriptors.XmlDescriptors;
-import com.android.ide.eclipse.adt.internal.resources.AttrsXmlParser;
-import com.android.ide.eclipse.adt.internal.resources.DeclareStyleableInfo;
-import com.android.ide.eclipse.adt.internal.resources.IResourceRepository;
-import com.android.ide.eclipse.adt.internal.resources.ResourceItem;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
-import com.android.ide.eclipse.adt.internal.resources.ViewClassInfo;
-import com.android.ide.eclipse.adt.internal.resources.manager.ProjectResources;
+import com.android.ide.eclipse.adt.internal.editors.otherxml.descriptors.OtherXmlDescriptors;
 import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
-import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData.LayoutBridge;
-import com.android.layoutlib.api.ILayoutBridge;
 import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.SdkConstants;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -41,16 +40,11 @@ import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubMonitor;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.net.URI;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -93,22 +87,9 @@ public final class AndroidTargetParser {
         try {
             SubMonitor progress = SubMonitor.convert(monitor,
                     String.format("Parsing SDK %1$s", mAndroidTarget.getName()),
-                    14);
+                    16);
 
             AndroidTargetData targetData = new AndroidTargetData(mAndroidTarget);
-
-            // load DX.
-            DexWrapper dexWrapper = new DexWrapper();
-            IStatus res = dexWrapper.loadDex(mAndroidTarget.getPath(IAndroidTarget.DX_JAR));
-            if (res != Status.OK_STATUS) {
-                return new Status(IStatus.ERROR, AdtPlugin.PLUGIN_ID,
-                        String.format("dx.jar loading failed for target '%1$s'",
-                                mAndroidTarget.getFullName()));
-            }
-
-            // we have loaded dx.
-            targetData.setDexWrapper(dexWrapper);
-            progress.worked(1);
 
             // parse the rest of the data.
 
@@ -116,15 +97,6 @@ public final class AndroidTargetParser {
                 new AndroidJarLoader(mAndroidTarget.getPath(IAndroidTarget.ANDROID_JAR));
 
             preload(classLoader, progress.newChild(40, SubMonitor.SUPPRESS_NONE));
-
-            if (progress.isCanceled()) {
-                return Status.CANCEL_STATUS;
-            }
-
-            // get the resource Ids.
-            progress.subTask("Resource IDs");
-            IResourceRepository frameworkRepository = collectResourceIds(classLoader);
-            progress.worked(1);
 
             if (progress.isCanceled()) {
                 return Status.CANCEL_STATUS;
@@ -156,14 +128,18 @@ public final class AndroidTargetParser {
             // gather the attribute definition
             progress.subTask("Attributes definitions");
             AttrsXmlParser attrsXmlParser = new AttrsXmlParser(
-                    mAndroidTarget.getPath(IAndroidTarget.ATTRIBUTES));
+                    mAndroidTarget.getPath(IAndroidTarget.ATTRIBUTES),
+                    AdtPlugin.getDefault(),
+                    1000);
             attrsXmlParser.preload();
+
             progress.worked(1);
 
             progress.subTask("Manifest definitions");
             AttrsXmlParser attrsManifestXmlParser = new AttrsXmlParser(
                     mAndroidTarget.getPath(IAndroidTarget.MANIFEST_ATTRIBUTES),
-                    attrsXmlParser);
+                    attrsXmlParser,
+                    AdtPlugin.getDefault(), 1100);
             attrsManifestXmlParser.preload();
             progress.worked(1);
 
@@ -225,7 +201,8 @@ public final class AndroidTargetParser {
             }
 
             LayoutDescriptors layoutDescriptors = new LayoutDescriptors();
-            layoutDescriptors.updateDescriptors(layoutViewsInfo, layoutGroupsInfo);
+            layoutDescriptors.updateDescriptors(layoutViewsInfo, layoutGroupsInfo,
+                    attrsXmlParser.getDeclareStyleableList(), mAndroidTarget);
             progress.worked(1);
 
             if (progress.isCanceled()) {
@@ -240,29 +217,70 @@ public final class AndroidTargetParser {
                 return Status.CANCEL_STATUS;
             }
 
-            XmlDescriptors xmlDescriptors = new XmlDescriptors();
-            xmlDescriptors.updateDescriptors(
+            OtherXmlDescriptors otherXmlDescriptors = new OtherXmlDescriptors();
+            otherXmlDescriptors.updateDescriptors(
                     xmlSearchableMap,
                     xmlAppWidgetMap,
                     preferencesInfo,
                     preferenceGroupsInfo);
             progress.worked(1);
 
+            if (progress.isCanceled()) {
+                return Status.CANCEL_STATUS;
+            }
+
+            DrawableDescriptors drawableDescriptors = new DrawableDescriptors();
+            Map<String, DeclareStyleableInfo> map = attrsXmlParser.getDeclareStyleableList();
+            drawableDescriptors.updateDescriptors(map);
+            progress.worked(1);
+
+            if (progress.isCanceled()) {
+                return Status.CANCEL_STATUS;
+            }
+
+            AnimatorDescriptors animatorDescriptors = new AnimatorDescriptors();
+            animatorDescriptors.updateDescriptors(map);
+            progress.worked(1);
+
+            if (progress.isCanceled()) {
+                return Status.CANCEL_STATUS;
+            }
+
+            AnimDescriptors animDescriptors = new AnimDescriptors();
+            animDescriptors.updateDescriptors(map);
+            progress.worked(1);
+
+            if (progress.isCanceled()) {
+                return Status.CANCEL_STATUS;
+            }
+
+            ColorDescriptors colorDescriptors = new ColorDescriptors();
+            colorDescriptors.updateDescriptors(map);
+            progress.worked(1);
+
             // load the framework resources.
-            ProjectResources resources = ResourceManager.getInstance().loadFrameworkResources(
-                    mAndroidTarget);
+            ResourceRepository frameworkResources =
+                    ResourceManager.getInstance().loadFrameworkResources(mAndroidTarget);
             progress.worked(1);
 
             // now load the layout lib bridge
-            LayoutBridge layoutBridge = loadLayoutBridge();
+            LayoutLibrary layoutBridge =  LayoutLibrary.load(
+                    mAndroidTarget.getPath(IAndroidTarget.LAYOUT_LIB),
+                    AdtPlugin.getDefault(),
+                    "ADT plug-in");
+
             progress.worked(1);
 
             // and finally create the PlatformData with all that we loaded.
-            targetData.setExtraData(frameworkRepository,
+            targetData.setExtraData(
                     manifestDescriptors,
                     layoutDescriptors,
                     menuDescriptors,
-                    xmlDescriptors,
+                    otherXmlDescriptors,
+                    drawableDescriptors,
+                    animatorDescriptors,
+                    animDescriptors,
+                    colorDescriptors,
                     enumValueMap,
                     permissionValues,
                     activity_actions.toArray(new String[activity_actions.size()]),
@@ -271,8 +289,10 @@ public final class AndroidTargetParser {
                     categories.toArray(new String[categories.size()]),
                     mAndroidTarget.getPlatformLibraries(),
                     mAndroidTarget.getOptionalLibraries(),
-                    resources,
+                    frameworkResources,
                     layoutBridge);
+
+            targetData.setAttributeMap(attrsXmlParser.getAttributeMap());
 
             Sdk.getCurrent().setTargetData(mAndroidTarget, targetData);
 
@@ -302,72 +322,6 @@ public final class AndroidTargetParser {
         } catch (IOException e) {
             AdtPlugin.log(e, "Problem preloading classes"); //$NON-NLS-1$
         }
-    }
-
-    /**
-     * Creates an IResourceRepository for the framework resources.
-     *
-     * @param classLoader The framework SDK jar classloader
-     * @return a map of the resources, or null if it failed.
-     */
-    private IResourceRepository collectResourceIds(
-            AndroidJarLoader classLoader) {
-        try {
-            Class<?> r = classLoader.loadClass(SdkConstants.CLASS_R);
-
-            if (r != null) {
-                Map<ResourceType, List<ResourceItem>> map = parseRClass(r);
-                if (map != null) {
-                    return new FrameworkResourceRepository(map);
-                }
-            }
-        } catch (ClassNotFoundException e) {
-            AdtPlugin.logAndPrintError(e, TAG,
-                    "Collect resource IDs failed, class %1$s not found in %2$s", //$NON-NLS-1$
-                    SdkConstants.CLASS_R,
-                    mAndroidTarget.getPath(IAndroidTarget.ANDROID_JAR));
-        }
-
-        return null;
-    }
-
-    /**
-     * Parse the R class and build the resource map.
-     *
-     * @param rClass the Class object representing the Resources.
-     * @return a map of the resource or null
-     */
-    private Map<ResourceType, List<ResourceItem>> parseRClass(Class<?> rClass) {
-        // get the sub classes.
-        Class<?>[] classes = rClass.getClasses();
-
-        if (classes.length > 0) {
-            HashMap<ResourceType, List<ResourceItem>> map =
-                new HashMap<ResourceType, List<ResourceItem>>();
-
-            // get the fields of each class.
-            for (int c = 0 ; c < classes.length ; c++) {
-                Class<?> subClass = classes[c];
-                String name = subClass.getSimpleName();
-
-                // get the matching ResourceType
-                ResourceType type = ResourceType.getEnum(name);
-                if (type != null) {
-                    List<ResourceItem> list = new ArrayList<ResourceItem>();
-                    map.put(type, list);
-
-                    Field[] fields = subClass.getFields();
-
-                    for (Field f : fields) {
-                        list.add(new ResourceItem(f.getName()));
-                    }
-                }
-            }
-
-            return map;
-        }
-
-        return null;
     }
 
     /**
@@ -648,62 +602,4 @@ public final class AndroidTargetParser {
         return attrsXmlParser.getDeclareStyleableList();
     }
 
-    /**
-     * Loads the layout bridge from the dynamically loaded layoutlib.jar
-     */
-    private LayoutBridge loadLayoutBridge() {
-        LayoutBridge layoutBridge = new LayoutBridge();
-
-        try {
-            // get the URL for the file.
-            File f = new File(mAndroidTarget.getPath(IAndroidTarget.LAYOUT_LIB));
-            if (f.isFile() == false) {
-                AdtPlugin.log(IStatus.ERROR, "layoutlib.jar is missing!"); //$NON-NLS-1$
-            } else {
-                URI uri = f.toURI();
-                URL url = uri.toURL();
-
-                // create a class loader. Because this jar reference interfaces
-                // that are in the editors plugin, it's important to provide
-                // a parent class loader.
-                layoutBridge.classLoader = new URLClassLoader(new URL[] { url },
-                        this.getClass().getClassLoader());
-
-                // load the class
-                Class<?> clazz = layoutBridge.classLoader.loadClass(AndroidConstants.CLASS_BRIDGE);
-                if (clazz != null) {
-                    // instantiate an object of the class.
-                    Constructor<?> constructor = clazz.getConstructor();
-                    if (constructor != null) {
-                        Object bridge = constructor.newInstance();
-                        if (bridge instanceof ILayoutBridge) {
-                            layoutBridge.bridge = (ILayoutBridge)bridge;
-                        }
-                    }
-                }
-
-                if (layoutBridge.bridge == null) {
-                    layoutBridge.status = LoadStatus.FAILED;
-                    AdtPlugin.log(IStatus.ERROR, "Failed to load " + AndroidConstants.CLASS_BRIDGE); //$NON-NLS-1$
-                } else {
-                    // get the api level
-                    try {
-                        layoutBridge.apiLevel = layoutBridge.bridge.getApiLevel();
-                    } catch (AbstractMethodError e) {
-                        // the first version of the api did not have this method
-                        layoutBridge.apiLevel = 1;
-                    }
-
-                    // and mark the lib as loaded.
-                    layoutBridge.status = LoadStatus.LOADED;
-                }
-            }
-        } catch (Throwable t) {
-            layoutBridge.status = LoadStatus.FAILED;
-            // log the error.
-            AdtPlugin.log(t, "Failed to load the LayoutLib");
-        }
-
-        return layoutBridge;
-    }
 }

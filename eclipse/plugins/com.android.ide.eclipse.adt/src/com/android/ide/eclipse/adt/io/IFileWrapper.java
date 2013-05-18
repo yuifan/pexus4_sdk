@@ -16,14 +16,15 @@
 
 package com.android.ide.eclipse.adt.io;
 
-import com.android.sdklib.io.IAbstractFile;
-import com.android.sdklib.io.IAbstractFolder;
-import com.android.sdklib.io.StreamException;
+import com.android.io.IAbstractFile;
+import com.android.io.IAbstractFolder;
+import com.android.io.StreamException;
 
 import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.NullProgressMonitor;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -42,22 +43,29 @@ public class IFileWrapper implements IAbstractFile {
         mFile = file;
     }
 
+    @Override
     public InputStream getContents() throws StreamException {
         try {
             return mFile.getContents();
         } catch (CoreException e) {
-            throw new StreamException(e);
+            StreamException.Error error = StreamException.Error.DEFAULT;
+            if (mFile.isSynchronized(IResource.DEPTH_ZERO) == false) {
+                error = StreamException.Error.OUTOFSYNC;
+            }
+            throw new StreamException(e, this, error);
         }
     }
 
+    @Override
     public void setContents(InputStream source) throws StreamException {
         try {
             mFile.setContents(source, IResource.FORCE, null);
         } catch (CoreException e) {
-            throw new StreamException(e);
+            throw new StreamException(e, this);
         }
     }
 
+    @Override
     public OutputStream getOutputStream() throws StreamException {
         return new ByteArrayOutputStream() {
             @Override
@@ -74,20 +82,34 @@ public class IFileWrapper implements IAbstractFile {
         };
     }
 
+    @Override
     public PreferredWriteMode getPreferredWriteMode() {
         return PreferredWriteMode.INPUTSTREAM;
     }
 
+    @Override
     public String getOsLocation() {
         return mFile.getLocation().toOSString();
     }
 
+    @Override
     public String getName() {
         return mFile.getName();
     }
 
+    @Override
     public boolean exists() {
         return mFile.exists();
+    }
+
+    @Override
+    public boolean delete() {
+        try {
+            mFile.delete(true /*force*/, new NullProgressMonitor());
+            return true;
+        } catch (CoreException e) {
+            return false;
+        }
     }
 
     /**
@@ -95,6 +117,11 @@ public class IFileWrapper implements IAbstractFile {
      */
     public IFile getIFile() {
         return mFile;
+    }
+
+    @Override
+    public long getModificationStamp() {
+        return mFile.getModificationStamp();
     }
 
     @Override
@@ -115,6 +142,7 @@ public class IFileWrapper implements IAbstractFile {
         return mFile.hashCode();
     }
 
+    @Override
     public IAbstractFolder getParentFolder() {
         IContainer p = mFile.getParent();
         if (p != null) {
@@ -122,5 +150,10 @@ public class IFileWrapper implements IAbstractFile {
         }
 
         return null;
+    }
+
+    @Override
+    public String toString() {
+        return mFile.toString();
     }
 }

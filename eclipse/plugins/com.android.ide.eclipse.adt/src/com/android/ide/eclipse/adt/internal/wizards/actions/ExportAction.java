@@ -16,6 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.wizards.actions;
 
+import com.android.ide.eclipse.adt.internal.lint.EclipseLintRunner;
 import com.android.ide.eclipse.adt.internal.project.ExportHelper;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
@@ -38,10 +39,12 @@ public class ExportAction implements IObjectActionDelegate {
     /**
      * @see IObjectActionDelegate#setActivePart(IAction, IWorkbenchPart)
      */
+    @Override
     public void setActivePart(IAction action, IWorkbenchPart targetPart) {
         mShell = targetPart.getSite().getShell();
     }
 
+    @Override
     public void run(IAction action) {
         if (mSelection instanceof IStructuredSelection) {
             IStructuredSelection selection = (IStructuredSelection)mSelection;
@@ -59,18 +62,23 @@ public class ExportAction implements IObjectActionDelegate {
 
                 // and finally do the action
                 if (project != null) {
+                    if (!EclipseLintRunner.runLintOnExport(mShell, project)) {
+                        return;
+                    }
+
                     ProjectState state = Sdk.getProjectState(project);
                     if (state.isLibrary()) {
                         MessageDialog.openError(mShell, "Android Export",
                                 "Android library projects cannot be exported.");
                     } else {
-                        ExportHelper.exportProject(project);
+                        ExportHelper.exportUnsignedReleaseApk(project);
                     }
                 }
             }
         }
     }
 
+    @Override
     public void selectionChanged(IAction action, ISelection selection) {
         mSelection = selection;
     }

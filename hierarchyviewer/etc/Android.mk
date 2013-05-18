@@ -15,6 +15,6 @@
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
-LOCAL_PREBUILT_EXECUTABLES := hierarchyviewer
+LOCAL_PREBUILT_EXECUTABLES := hierarchyviewer1
+LOCAL_MODULE_TAGS := debug
 include $(BUILD_HOST_PREBUILT)
-

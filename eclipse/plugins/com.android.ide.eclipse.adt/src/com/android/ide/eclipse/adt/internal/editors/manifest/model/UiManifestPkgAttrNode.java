@@ -16,6 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.editors.manifest.model;
 
+import com.android.ide.common.xml.ManifestData;
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
@@ -28,7 +29,6 @@ import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
 import com.android.ide.eclipse.adt.internal.project.ProjectHelper;
 import com.android.ide.eclipse.adt.internal.wizards.actions.NewProjectAction;
 import com.android.ide.eclipse.adt.internal.wizards.newproject.NewProjectWizard;
-import com.android.sdklib.xml.ManifestData;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.jdt.core.IJavaProject;
@@ -66,7 +66,7 @@ import org.eclipse.ui.part.FileEditorInput;
 import java.util.TreeSet;
 
 /**
- * Represents an XML attribute to select an exisintg manifest package, that can be modified using
+ * Represents an XML attribute to select an existing manifest package, that can be modified using
  * a simple text field or a dialog to choose an existing package.
  * <p/>
  * See {@link UiTextAttributeNode} for more information.
@@ -144,6 +144,7 @@ public class UiManifestPkgAttrNode extends UiTextAttributeNode {
     @Override
     protected void onAddValidators(final Text text) {
         ModifyListener listener = new ModifyListener() {
+            @Override
             public void modifyText(ModifyEvent e) {
                 String package_name = text.getText();
                 if (package_name.indexOf('.') < 1) {
@@ -160,6 +161,7 @@ public class UiManifestPkgAttrNode extends UiTextAttributeNode {
 
         // Make sure the validator removes its message(s) when the widget is disposed
         text.addDisposeListener(new DisposeListener() {
+            @Override
             public void widgetDisposed(DisposeEvent e) {
                 getManagedForm().getMessageManager().removeMessage(text, text);
             }
@@ -178,24 +180,30 @@ public class UiManifestPkgAttrNode extends UiTextAttributeNode {
         ElementListSelectionDialog dialog = new ElementListSelectionDialog(
                 getTextWidget().getShell(),
                 new ILabelProvider() {
+                    @Override
                     public Image getImage(Object element) {
                         return null;
                     }
 
+                    @Override
                     public String getText(Object element) {
                         return element.toString();
                     }
 
+                    @Override
                     public void addListener(ILabelProviderListener listener) {
                     }
 
+                    @Override
                     public void dispose() {
                     }
 
+                    @Override
                     public boolean isLabelProperty(Object element, String property) {
                         return false;
                     }
 
+                    @Override
                     public void removeListener(ILabelProviderListener listener) {
                     }
                 });

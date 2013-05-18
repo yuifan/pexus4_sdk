@@ -16,27 +16,31 @@
 
 package com.android.ide.eclipse.adt.internal.editors.resources.manager;
 
-import com.android.ide.eclipse.adt.internal.resources.configurations.FolderConfiguration;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ResourceQualifier;
+import com.android.SdkConstants;
+import com.android.ide.common.resources.ResourceFile;
+import com.android.ide.common.resources.ResourceFolder;
+import com.android.ide.common.resources.ResourceItem;
+import com.android.ide.common.resources.ResourceRepository;
+import com.android.ide.common.resources.SingleResourceFile;
+import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.ide.eclipse.adt.internal.resources.manager.ProjectResources;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFile;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFolder;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFolderType;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
-import com.android.ide.eclipse.adt.internal.resources.manager.SingleResourceFile;
 import com.android.ide.eclipse.adt.io.IFileWrapper;
 import com.android.ide.eclipse.adt.io.IFolderWrapper;
-import com.android.ide.eclipse.mock.FileMock;
-import com.android.ide.eclipse.mock.FolderMock;
-import com.android.sdklib.io.IAbstractFolder;
-import com.android.sdklib.resources.Keyboard;
-import com.android.sdklib.resources.KeyboardState;
-import com.android.sdklib.resources.Navigation;
-import com.android.sdklib.resources.ScreenOrientation;
-import com.android.sdklib.resources.TouchScreen;
+import com.android.ide.eclipse.mock.Mocks;
+import com.android.io.IAbstractFolder;
+import com.android.io.IAbstractResource;
+import com.android.resources.Keyboard;
+import com.android.resources.KeyboardState;
+import com.android.resources.Navigation;
+import com.android.resources.NavigationState;
+import com.android.resources.NightMode;
+import com.android.resources.ResourceFolderType;
+import com.android.resources.ScreenOrientation;
+import com.android.resources.TouchScreen;
+import com.android.resources.UiMode;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IFolder;
 
 import junit.framework.TestCase;
 
@@ -45,8 +49,8 @@ public class ConfigMatchTest extends TestCase {
     private static final String MISC1_FILENAME = "foo.xml"; //$NON-NLS-1$
     private static final String MISC2_FILENAME = "bar.xml"; //$NON-NLS-1$
 
-    private ProjectResources mResources;
-    private ResourceQualifier[] mQualifierList;
+    private FolderConfiguration mDefaultConfig;
+    private ResourceRepository mResources;
     private FolderConfiguration config4;
     private FolderConfiguration config3;
     private FolderConfiguration config2;
@@ -56,29 +60,31 @@ public class ConfigMatchTest extends TestCase {
     protected void setUp() throws Exception {
         super.setUp();
 
-        // create a Resource Manager to get a list of qualifier as instantiated by the real code.
-        // Thanks for QualifierListTest we know this contains all the qualifiers.
-        ResourceManager manager = ResourceManager.getInstance();
-        Field qualifierListField = ResourceManager.class.getDeclaredField("mQualifiers");
-        assertNotNull(qualifierListField);
-        qualifierListField.setAccessible(true);
+        // create a default config with all qualifiers.
+        mDefaultConfig = new FolderConfiguration();
+        mDefaultConfig.createDefault();
 
-        // get the actual list.
-        mQualifierList = (ResourceQualifier[])qualifierListField.get(manager);
+        IAbstractFolder folder = Mocks.createAbstractFolder(
+                SdkConstants.FD_RESOURCES, new IAbstractResource[0]);
 
         // create the project resources.
-        mResources = new ProjectResources(null /*project*/);
+        mResources = new ResourceRepository(folder, false) {
+            @Override
+            protected ResourceItem createResourceItem(String name) {
+                return new ResourceItem(name);
+            }
+        };
 
         // create 2 arrays of IResource. one with the filename being looked up, and one without.
         // Since the required API uses IResource, we can use MockFolder for them.
-        FileMock[] validMemberList = new FileMock[] {
-                new FileMock(MISC1_FILENAME),
-                new FileMock(SEARCHED_FILENAME),
-                new FileMock(MISC2_FILENAME),
+        IFile[] validMemberList = new IFile[] {
+                Mocks.createFile(MISC1_FILENAME),
+                Mocks.createFile(SEARCHED_FILENAME),
+                Mocks.createFile(MISC2_FILENAME),
         };
-        FileMock[] invalidMemberList = new FileMock[] {
-                new FileMock(MISC1_FILENAME),
-                new FileMock(MISC2_FILENAME),
+        IFile[] invalidMemberList = new IFile[] {
+                Mocks.createFile(MISC1_FILENAME),
+                Mocks.createFile(MISC2_FILENAME),
         };
 
         // add multiple ResourceFolder to the project resource.
@@ -87,14 +93,20 @@ public class ConfigMatchTest extends TestCase {
                 null, // network code
                 null, // language
                 null, // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 null, // screen size
                 null, // screen ratio
                 null, // screen orientation
+                null, // dock mode
+                null, // night mode
                 null, // dpi
                 null, // touch mode
                 null, // keyboard state
                 null, // text input
-                null, // navigation
+                null, // navigation state
+                null, // navigation method
                 null, // screen dimension
                 null);// version
 
@@ -105,14 +117,20 @@ public class ConfigMatchTest extends TestCase {
                 null, // network code
                 "en", // language
                 null, // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 null, // screen size
                 null, // screen ratio
                 null, // screen orientation
+                null, // dock mode
+                null, // night mode
                 null, // dpi
                 null, // touch mode
                 KeyboardState.EXPOSED.getResourceValue(), // keyboard state
                 null, // text input
-                null, // navigation
+                null, // navigation state
+                null, // navigation method
                 null, // screen dimension
                 null);// version
 
@@ -123,14 +141,20 @@ public class ConfigMatchTest extends TestCase {
                 null, // network code
                 "en", // language
                 null, // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 null, // screen size
                 null, // screen ratio
                 null, // screen orientation
+                null, // dock mode
+                null, // night mode
                 null, // dpi
                 null, // touch mode
                 KeyboardState.HIDDEN.getResourceValue(), // keyboard state
                 null, // text input
-                null, // navigation
+                null, // navigation state
+                null, // navigation method
                 null, // screen dimension
                 null);// version
 
@@ -141,14 +165,20 @@ public class ConfigMatchTest extends TestCase {
                 null, // network code
                 "en", // language
                 null, // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 null, // screen size
                 null, // screen ratio
                 ScreenOrientation.LANDSCAPE.getResourceValue(), // screen orientation
+                null, // dock mode
+                null, // night mode
                 null, // dpi
                 null, // touch mode
                 null, // keyboard state
                 null, // text input
-                null, // navigation
+                null, // navigation state
+                null, // navigation method
                 null, // screen dimension
                 null);// version
 
@@ -159,14 +189,20 @@ public class ConfigMatchTest extends TestCase {
                 "mnc435", // network code
                 "en", // language
                 "rUS", // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 "normal", // screen size
                 "notlong", // screen ratio
                 ScreenOrientation.LANDSCAPE.getResourceValue(), // screen orientation
+                UiMode.DESK.getResourceValue(), // dock mode
+                NightMode.NIGHT.getResourceValue(), // night mode
                 "mdpi", // dpi
                 TouchScreen.FINGER.getResourceValue(), // touch mode
                 KeyboardState.EXPOSED.getResourceValue(), // keyboard state
                 Keyboard.QWERTY.getResourceValue(), // text input
-                Navigation.DPAD.getResourceValue(), // navigation
+                NavigationState.EXPOSED.getResourceValue(), // navigation state
+                Navigation.DPAD.getResourceValue(), // navigation method
                 "480x320", // screen dimension
                 "v3"); // version
 
@@ -185,14 +221,20 @@ public class ConfigMatchTest extends TestCase {
                 "mnc435", // network code
                 "en", // language
                 "rUS", // region
+                null, // smallest width dp
+                null, // width dp
+                null, // height dp
                 "normal", // screen size
                 "notlong", // screen ratio
                 ScreenOrientation.LANDSCAPE.getResourceValue(), // screen orientation
+                UiMode.DESK.getResourceValue(), // dock mode
+                NightMode.NIGHT.getResourceValue(), // night mode
                 "mdpi", // dpi
                 TouchScreen.FINGER.getResourceValue(), // touch mode
                 KeyboardState.EXPOSED.getResourceValue(), // keyboard state
                 Keyboard.QWERTY.getResourceValue(), // text input
-                Navigation.DPAD.getResourceValue(), // navigation
+                NavigationState.EXPOSED.getResourceValue(), // navigation state
+                Navigation.DPAD.getResourceValue(), // navigation method
                 "480x320", // screen dimension
                 "v3"); // version
 
@@ -210,17 +252,18 @@ public class ConfigMatchTest extends TestCase {
      * this particular qualifier.
      */
     private FolderConfiguration getConfiguration(String... qualifierValues) {
+        // FolderConfiguration.getQualifierCount is always valid and up to date.
+        final int count = FolderConfiguration.getQualifierCount();
+
+        // Check we have the right number of qualifier.
+        assertEquals(qualifierValues.length, count);
+
         FolderConfiguration config = new FolderConfiguration();
 
-        // those must be of the same length
-        assertEquals(qualifierValues.length, mQualifierList.length);
-
-        int index = 0;
-
-        for (ResourceQualifier qualifier : mQualifierList) {
-            String value = qualifierValues[index++];
+        for (int i = 0 ; i < count ; i++) {
+            String value = qualifierValues[i];
             if (value != null) {
-                assertTrue(qualifier.checkAndSet(value, config));
+                assertTrue(mDefaultConfig.getQualifier(i).checkAndSet(value, config));
             }
         }
 
@@ -230,42 +273,25 @@ public class ConfigMatchTest extends TestCase {
     /**
      * Adds a folder to the given {@link ProjectResources} with the given
      * {@link FolderConfiguration}. The folder is filled with files from the provided list.
-     * @param resources the {@link ProjectResources} in which to add the folder.
+     * @param resources the {@link ResourceRepository} in which to add the folder.
      * @param config the {@link FolderConfiguration} for the created folder.
      * @param memberList the list of files for the folder.
      */
-    private void addFolder(ProjectResources resources, FolderConfiguration config,
-            FileMock[] memberList) throws Exception {
+    private void addFolder(ResourceRepository resources, FolderConfiguration config,
+            IFile[] memberList) throws Exception {
 
         // figure out the folder name based on the configuration
         String folderName = config.getFolderName(ResourceFolderType.LAYOUT);
 
         // create the folder mock
-        FolderMock folder = new FolderMock(folderName, memberList);
+        IFolder folder = Mocks.createFolder(folderName, memberList);
 
         // add it to the resource, and get back a ResourceFolder object.
-        ResourceFolder resFolder = _addProjectResourceFolder(resources, config, folder);
+        ResourceFolder resFolder = resources.processFolder(new IFolderWrapper(folder));
 
         // and fill it with files from the list.
-        for (FileMock file : memberList) {
+        for (IFile file : memberList) {
             resFolder.addFile(new SingleResourceFile(new IFileWrapper(file), resFolder));
         }
-    }
-
-    /** Calls ProjectResource.add method via reflection to circumvent access
-     * restrictions that are enforced when running in the plug-in environment
-     * ie cannot access package or protected members in a different plug-in, even
-     * if they are in the same declared package as the accessor
-     */
-    private ResourceFolder _addProjectResourceFolder(ProjectResources resources,
-            FolderConfiguration config, FolderMock folder) throws Exception {
-
-        Method addMethod = ProjectResources.class.getDeclaredMethod("add",
-                ResourceFolderType.class, FolderConfiguration.class,
-                IAbstractFolder.class);
-        addMethod.setAccessible(true);
-        ResourceFolder resFolder = (ResourceFolder)addMethod.invoke(resources,
-                ResourceFolderType.LAYOUT, config, new IFolderWrapper(folder));
-        return resFolder;
     }
 }

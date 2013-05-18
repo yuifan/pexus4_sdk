@@ -47,7 +47,7 @@ final class ExportLinksPart extends ManifestSectionPart {
         final Composite table = createTableLayout(toolkit, 2 /* numColumns */);
 
         StringBuffer buf = new StringBuffer();
-        buf.append("<form>"); // $NON-NLS-1$
+        buf.append("<form>"); //$NON-NLS-1$
 
         buf.append("<li style=\"image\" value=\"android_img\"><a href=\"action_dosomething\">");
         buf.append("TODO Custom Action");
@@ -55,15 +55,15 @@ final class ExportLinksPart extends ManifestSectionPart {
         buf.append(": blah blah do something (like build/export).");
         buf.append("</li>"); //$NON-NLS-1$
 
-        buf.append(String.format("<li style=\"image\" value=\"android_img\"><a href=\"page:%1$s\">", // $NON-NLS-1$
+        buf.append(String.format("<li style=\"image\" value=\"android_img\"><a href=\"page:%1$s\">", //$NON-NLS-1$
                 ExportEditor.TEXT_EDITOR_ID));
         buf.append("XML Source");
         buf.append("</a>"); //$NON-NLS-1$
         buf.append(": Directly edit the AndroidManifest.xml file.");
         buf.append("</li>"); //$NON-NLS-1$
 
-        buf.append("<li style=\"image\" value=\"android_img\">"); // $NON-NLS-1$
-        buf.append("<a href=\"http://code.google.com/android/devel/bblocks-manifest.html\">Documentation</a>: Documentation from the Android SDK for AndroidManifest.xml."); // $NON-NLS-1$
+        buf.append("<li style=\"image\" value=\"android_img\">"); //$NON-NLS-1$
+        buf.append("<a href=\"http://code.google.com/android/devel/bblocks-manifest.html\">Documentation</a>: Documentation from the Android SDK for AndroidManifest.xml."); //$NON-NLS-1$
         buf.append("</li>"); //$NON-NLS-1$
         buf.append("</form>"); //$NON-NLS-1$
 
@@ -77,14 +77,17 @@ final class ExportLinksPart extends ManifestSectionPart {
         mFormText.addHyperlinkListener(editor.createHyperlinkListener());
 
         mFormText.addHyperlinkListener(new IHyperlinkListener() {
+            @Override
             public void linkExited(HyperlinkEvent e) {
                 // pass
             }
 
+            @Override
             public void linkEntered(HyperlinkEvent e) {
                 // pass
             }
 
+            @Override
             public void linkActivated(HyperlinkEvent e) {
                 String link = e.data.toString();
                 if ("action_dosomething".equals(link)) {

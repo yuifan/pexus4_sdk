@@ -16,20 +16,28 @@
 
 package com.android.ide.eclipse.adt.internal.build;
 
-import com.android.ide.eclipse.adt.AndroidConstants;
+import com.android.ide.eclipse.adt.AdtConstants;
+import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.jface.text.FindReplaceDocumentAdapter;
+import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.text.IRegion;
+import org.eclipse.jface.text.Region;
+import org.eclipse.ui.editors.text.TextFileDocumentProvider;
+import org.eclipse.ui.texteditor.IDocumentProvider;
 
 import java.io.File;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class AaptParser {
+public final class AaptParser {
 
     // TODO: rename the pattern to something that makes sense + javadoc comments.
     /**
@@ -118,6 +126,74 @@ public class AaptParser {
             "^(invalid resource directory name): (.*)$"); //$NON-NLS-1$
 
     /**
+     * Portion of the error message which states the context in which the error occurred,
+     * such as which property was being processed and what the string value was that
+     * caused the error.
+     * <p>
+     * Example:
+     * error: No resource found that matches the given name (at 'text' with value '@string/foo')
+     */
+    private static final Pattern sValueRangePattern =
+        Pattern.compile("\\(at '(.+)' with value '(.*)'\\)"); //$NON-NLS-1$
+
+
+    /**
+     * Portion of error message which points to the second occurrence of a repeated resource
+     * definition.
+     * <p>
+     * Example:
+     * error: Resource entry repeatedStyle1 already has bag item android:gravity.
+     */
+    private static final Pattern sRepeatedRangePattern =
+        Pattern.compile("Resource entry (.+) already has bag item (.+)\\."); //$NON-NLS-1$
+
+    /**
+     * Error message emitted when aapt skips a file because for example it's name is
+     * invalid, such as a layout file name which starts with _.
+     * <p>
+     * This error message is used by AAPT in Tools 19 and earlier.
+     */
+    private static final Pattern sSkippingPattern =
+        Pattern.compile("    \\(skipping (.+) .+ '(.*)'\\)"); //$NON-NLS-1$
+
+    /**
+     * Error message emitted when aapt skips a file because for example it's name is
+     * invalid, such as a layout file name which starts with _.
+     * <p>
+     * This error message is used by AAPT in Tools 20 and later.
+     */
+    private static final Pattern sNewSkippingPattern =
+        Pattern.compile("    \\(skipping .+ '(.+)' due to ANDROID_AAPT_IGNORE pattern '.+'\\)"); //$NON-NLS-1$
+
+    /**
+     * Suffix of error message which points to the first occurrence of a repeated resource
+     * definition.
+     * Example:
+     * Originally defined here.
+     */
+    private static final String ORIGINALLY_DEFINED_MSG = "Originally defined here."; //$NON-NLS-1$
+
+    /**
+     * Portion of error message which points to the second occurrence of a repeated resource
+     * definition.
+     * <p>
+     * Example:
+     * error: Resource entry repeatedStyle1 already has bag item android:gravity.
+     */
+    private static final Pattern sNoResourcePattern =
+        Pattern.compile("No resource found that matches the given name: attr '(.+)'\\."); //$NON-NLS-1$
+
+    /**
+     * Portion of error message which points to a missing required attribute in a
+     * resource definition.
+     * <p>
+     * Example:
+     * error: error: A 'name' attribute is required for <style>
+     */
+    private static final Pattern sRequiredPattern =
+        Pattern.compile("A '(.+)' attribute is required for <(.+)>"); //$NON-NLS-1$
+
+    /**
      * 2 line aapt error<br>
      * "ERROR: Invalid configuration: foo"<br>
      * "                              ^^^"<br>
@@ -126,6 +202,8 @@ public class AaptParser {
     private final static Pattern sPattern9Line1 = Pattern.compile(
             "^Invalid configuration: (.+)$"); //$NON-NLS-1$
 
+    private final static Pattern sXmlBlockPattern = Pattern.compile(
+            "W/ResourceType\\(.*\\): Bad XML block: no root element node found"); //$NON-NLS-1$
 
     /**
      * Parse the output of aapt and mark the incorrect file with error markers
@@ -134,10 +212,25 @@ public class AaptParser {
      * @param project the project containing the file to mark
      * @return true if the parsing failed, false if success.
      */
-    static final boolean parseOutput(ArrayList<String> results,
-            IProject project) {
+    public static boolean parseOutput(List<String> results, IProject project) {
+        int size = results.size();
+        if (size > 0) {
+            return parseOutput(results.toArray(new String[size]), project);
+        }
+
+        return false;
+    }
+
+    /**
+     * Parse the output of aapt and mark the incorrect file with error markers
+     *
+     * @param results the output of aapt
+     * @param project the project containing the file to mark
+     * @return true if the parsing failed, false if success.
+     */
+    public static boolean parseOutput(String[] results, IProject project) {
         // nothing to parse? just return false;
-        if (results.size() == 0) {
+        if (results.length == 0) {
             return false;
         }
 
@@ -147,8 +240,8 @@ public class AaptParser {
 
         Matcher m;
 
-        for (int i = 0; i < results.size(); i++) {
-            String p = results.get(i);
+        for (int i = 0; i < results.length ; i++) {
+            String p = results[i];
 
             m = sPattern0Line1.matcher(p);
             if (m.matches()) {
@@ -171,7 +264,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
                 continue;
@@ -183,10 +276,10 @@ public class AaptParser {
                 String location = m.group(1);
                 String msg = p; // default msg is the line in case we don't find anything else
 
-                if (++i < results.size()) {
-                    msg = results.get(i).trim();
-                    if (++i < results.size()) {
-                        msg = msg + " - " + results.get(i).trim(); //$NON-NLS-1$
+                if (++i < results.length) {
+                    msg = results[i].trim();
+                    if (++i < results.length) {
+                        msg = msg + " - " + results[i].trim(); //$NON-NLS-1$
 
                         // skip the next line
                         i++;
@@ -195,7 +288,7 @@ public class AaptParser {
 
                 // display the error
                 if (checkAndMark(location, null, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -219,7 +312,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
                 continue;
@@ -233,7 +326,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -257,7 +350,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -273,7 +366,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_WARNING) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_WARNING) == false) {
                     return true;
                 }
 
@@ -289,7 +382,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, lineStr, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -304,7 +397,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(location, null, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -322,7 +415,7 @@ public class AaptParser {
 
                 // check the values and attempt to mark the file.
                 if (checkAndMark(null /*location*/, null, msg, osRoot, project,
-                        AndroidConstants.MARKER_AAPT_PACKAGE, IMarker.SEVERITY_ERROR) == false) {
+                        AdtConstants.MARKER_AAPT_PACKAGE, IMarker.SEVERITY_ERROR) == false) {
                     return true;
                 }
 
@@ -330,7 +423,61 @@ public class AaptParser {
                 continue;
             }
 
-            // invalid line format, flag as error, and bail
+            m = sNewSkippingPattern.matcher(p);
+            if (m.matches()) {
+                String location = m.group(1);
+
+                if (location.startsWith(".")         //$NON-NLS-1$
+                        || location.endsWith("~")) { //$NON-NLS-1$
+                    continue;
+                }
+
+                // check the values and attempt to mark the file.
+                if (checkAndMark(location, null, p.trim(), osRoot, project,
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_WARNING) == false) {
+                    return true;
+                }
+
+                // success, go to the next line
+                continue;
+            }
+
+            m = sSkippingPattern.matcher(p);
+            if (m.matches()) {
+                String location = m.group(2);
+
+                // Certain files can safely be skipped without marking the project
+                // as having errors. See isHidden() in AaptAssets.cpp:
+                String type = m.group(1);
+                if (type.equals("backup")          //$NON-NLS-1$   // main.xml~, etc
+                        || type.equals("hidden")   //$NON-NLS-1$   // .gitignore, etc
+                        || type.equals("index")) { //$NON-NLS-1$   // thumbs.db, etc
+                    continue;
+                }
+
+                // check the values and attempt to mark the file.
+                if (checkAndMark(location, null, p.trim(), osRoot, project,
+                        AdtConstants.MARKER_AAPT_COMPILE, IMarker.SEVERITY_WARNING) == false) {
+                    return true;
+                }
+
+                // success, go to the next line
+                continue;
+            }
+
+            m = sXmlBlockPattern.matcher(p);
+            if (m.matches()) {
+                // W/ResourceType(12345): Bad XML block: no root element node found
+                // Sadly there's NO filename reference; this error typically describes the
+                // error *after* this line.
+                if (results.length == 1) {
+                    // This is the only error message: dump to console and quit
+                    return true;
+                }
+                // Continue: the real culprit is displayed next and should get a marker
+                continue;
+            }
+
             return true;
         }
 
@@ -383,12 +530,36 @@ public class AaptParser {
             }
         }
 
+        // Attempt to determine the exact range of characters affected by this error.
+        // This will look up the actual text of the file, go to the particular error line
+        // and scan for the specific string mentioned in the error.
+        int startOffset = -1;
+        int endOffset = -1;
+        if (f2 instanceof IFile) {
+            IRegion region = findRange((IFile) f2, line, message);
+            if (region != null) {
+                startOffset = region.getOffset();
+                endOffset = startOffset + region.getLength();
+            }
+        }
+
         // check if there's a similar marker already, since aapt is launched twice
         boolean markerAlreadyExists = false;
         try {
             IMarker[] markers = f2.findMarkers(markerId, true, IResource.DEPTH_ZERO);
 
             for (IMarker marker : markers) {
+                if (startOffset != -1) {
+                    int tmpBegin = marker.getAttribute(IMarker.CHAR_START, -1);
+                    if (tmpBegin != startOffset) {
+                        break;
+                    }
+                    int tmpEnd = marker.getAttribute(IMarker.CHAR_END, -1);
+                    if (tmpEnd != startOffset) {
+                        break;
+                    }
+                }
+
                 int tmpLine = marker.getAttribute(IMarker.LINE_NUMBER, -1);
                 if (tmpLine != line) {
                     break;
@@ -416,10 +587,156 @@ public class AaptParser {
         }
 
         if (markerAlreadyExists == false) {
-            BaseProjectHelper.markResource(f2, markerId, message, line, severity);
+            BaseProjectHelper.markResource(f2, markerId, message, line,
+                    startOffset, endOffset, severity);
         }
 
         return true;
+    }
+
+    /**
+     * Given an aapt error message in a given file and a given (initial) line number,
+     * return the corresponding offset range for the error, or null.
+     */
+    private static IRegion findRange(IFile file, int line, String message) {
+        Matcher matcher = sValueRangePattern.matcher(message);
+        if (matcher.find()) {
+            String property = matcher.group(1);
+            String value = matcher.group(2);
+
+            // First find the property. We can't just immediately look for the
+            // value, because there could be other attributes in this element
+            // earlier than the one in error, and we might accidentally pick
+            // up on a different occurrence of the value in a context where
+            // it is valid.
+            if (value.length() > 0) {
+                return findRange(file, line, property, value);
+            } else {
+                // Find first occurrence of property followed by '' or ""
+                IRegion region1 = findRange(file, line, property, "\"\""); //$NON-NLS-1$
+                IRegion region2 = findRange(file, line, property, "''");   //$NON-NLS-1$
+                if (region1 == null) {
+                    if (region2 == null) {
+                        // Highlight the property instead
+                        return findRange(file, line, property, null);
+                    }
+                    return region2;
+                } else if (region2 == null) {
+                    return region1;
+                } else if (region1.getOffset() < region2.getOffset()) {
+                    return region1;
+                } else {
+                    return region2;
+                }
+            }
+        }
+
+        matcher = sRepeatedRangePattern.matcher(message);
+        if (matcher.find()) {
+            String property = matcher.group(2);
+            return findRange(file, line, property, null);
+        }
+
+        matcher = sNoResourcePattern.matcher(message);
+        if (matcher.find()) {
+            String property = matcher.group(1);
+            return findRange(file, line, property, null);
+        }
+
+        matcher = sRequiredPattern.matcher(message);
+        if (matcher.find()) {
+            String elementName = matcher.group(2);
+            IRegion region = findRange(file, line, '<' + elementName, null);
+            if (region != null && region.getLength() > 1) {
+                // Skip the opening <
+                region = new Region(region.getOffset() + 1, region.getLength() - 1);
+            }
+            return region;
+        }
+
+        if (message.endsWith(ORIGINALLY_DEFINED_MSG)) {
+            return findLineTextRange(file, line);
+        }
+
+        return null;
+    }
+
+    /**
+     * Given a file and line number, return the range of the first match starting on the
+     * given line. If second is non null, also search for the second string starting at he
+     * location of the first string.
+     */
+    private static IRegion findRange(IFile file, int line, String first,
+            String second) {
+        IRegion region = null;
+        IDocumentProvider provider = new TextFileDocumentProvider();
+        try {
+            provider.connect(file);
+            IDocument document = provider.getDocument(file);
+            if (document != null) {
+                IRegion lineInfo = document.getLineInformation(line - 1);
+                int lineStartOffset = lineInfo.getOffset();
+                // The aapt errors will be anchored on the line where the
+                // element starts - which means that with formatting where
+                // attributes end up on subsequent lines we don't find it on
+                // the error line indicated by aapt.
+                // Therefore, search forwards in the document.
+                FindReplaceDocumentAdapter adapter =
+                    new FindReplaceDocumentAdapter(document);
+
+                region = adapter.find(lineStartOffset, first,
+                        true /*forwardSearch*/, true /*caseSensitive*/,
+                        false /*wholeWord*/, false /*regExSearch*/);
+                if (region != null && second != null) {
+                    region = adapter.find(region.getOffset() + first.length(), second,
+                            true /*forwardSearch*/, true /*caseSensitive*/,
+                            false /*wholeWord*/, false /*regExSearch*/);
+                }
+            }
+        } catch (Exception e) {
+            AdtPlugin.log(e, "Can't find range information for %1$s", file.getName());
+        } finally {
+            provider.disconnect(file);
+        }
+        return region;
+    }
+
+    /** Returns the non-whitespace line range at the given line number. */
+    private static IRegion findLineTextRange(IFile file, int line) {
+        IDocumentProvider provider = new TextFileDocumentProvider();
+        try {
+            provider.connect(file);
+            IDocument document = provider.getDocument(file);
+            if (document != null) {
+                IRegion lineInfo = document.getLineInformation(line - 1);
+                String lineContents = document.get(lineInfo.getOffset(), lineInfo.getLength());
+                int lineBegin = 0;
+                int lineEnd = lineContents.length()-1;
+
+                for (; lineEnd >= 0; lineEnd--) {
+                    char c = lineContents.charAt(lineEnd);
+                    if (!Character.isWhitespace(c)) {
+                        break;
+                    }
+                }
+                lineEnd++;
+                for (; lineBegin < lineEnd; lineBegin++) {
+                    char c = lineContents.charAt(lineBegin);
+                    if (!Character.isWhitespace(c)) {
+                        break;
+                    }
+                }
+                if (lineBegin < lineEnd) {
+                    return new Region(lineInfo.getOffset() + lineBegin, lineEnd - lineBegin);
+                }
+            }
+        } catch (Exception e) {
+            AdtPlugin.log(e, "Can't find range information for %1$s", file.getName());
+        } finally {
+            provider.disconnect(file);
+        }
+
+        return null;
     }
 
     /**
@@ -429,16 +746,16 @@ public class AaptParser {
      * @param pattern The pattern to match
      * @return null if error or no match, the matcher otherwise.
      */
-    private static final Matcher getNextLineMatcher(ArrayList<String> lines,
+    private static final Matcher getNextLineMatcher(String[] lines,
             int nextIndex, Pattern pattern) {
         // unless we can't, because we reached the last line
-        if (nextIndex == lines.size()) {
+        if (nextIndex == lines.length) {
             // we expected a 2nd line, so we flag as error
             // and we bail
             return null;
         }
 
-        Matcher m = pattern.matcher(lines.get(nextIndex));
+        Matcher m = pattern.matcher(lines[nextIndex]);
         if (m.matches()) {
            return m;
         }
@@ -455,7 +772,7 @@ public class AaptParser {
             IResource r = project.findMember(file);
 
             // if the resource is valid, we add the marker
-            if (r.exists()) {
+            if (r != null && r.exists()) {
                 return r;
             }
         }

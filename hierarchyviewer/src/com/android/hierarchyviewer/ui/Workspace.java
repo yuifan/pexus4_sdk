@@ -22,42 +22,70 @@ import com.android.hierarchyviewer.device.DeviceBridge;
 import com.android.hierarchyviewer.device.Window;
 import com.android.hierarchyviewer.laf.UnifiedContentBorder;
 import com.android.hierarchyviewer.scene.CaptureLoader;
+import com.android.hierarchyviewer.scene.ProfilesLoader;
 import com.android.hierarchyviewer.scene.VersionLoader;
 import com.android.hierarchyviewer.scene.ViewHierarchyLoader;
 import com.android.hierarchyviewer.scene.ViewHierarchyScene;
 import com.android.hierarchyviewer.scene.ViewManager;
 import com.android.hierarchyviewer.scene.ViewNode;
 import com.android.hierarchyviewer.scene.WindowsLoader;
-import com.android.hierarchyviewer.scene.ProfilesLoader;
+import com.android.hierarchyviewer.ui.action.CaptureLayersAction;
+import com.android.hierarchyviewer.ui.action.CaptureNodeAction;
+import com.android.hierarchyviewer.ui.action.DumpDisplayListAction;
+import com.android.hierarchyviewer.ui.action.ExitAction;
+import com.android.hierarchyviewer.ui.action.InvalidateAction;
+import com.android.hierarchyviewer.ui.action.LoadGraphAction;
+import com.android.hierarchyviewer.ui.action.RefreshWindowsAction;
+import com.android.hierarchyviewer.ui.action.RequestLayoutAction;
+import com.android.hierarchyviewer.ui.action.SaveSceneAction;
+import com.android.hierarchyviewer.ui.action.ShowDevicesAction;
+import com.android.hierarchyviewer.ui.action.StartServerAction;
+import com.android.hierarchyviewer.ui.action.StopServerAction;
+import com.android.hierarchyviewer.ui.model.ProfilesTableModel;
+import com.android.hierarchyviewer.ui.model.PropertiesTableModel;
+import com.android.hierarchyviewer.ui.model.ViewsTreeModel;
+import com.android.hierarchyviewer.ui.util.IconLoader;
+import com.android.hierarchyviewer.ui.util.PngFileFilter;
 import com.android.hierarchyviewer.ui.util.PsdFileFilter;
 import com.android.hierarchyviewer.util.OS;
 import com.android.hierarchyviewer.util.WorkerThread;
-import com.android.hierarchyviewer.ui.action.ShowDevicesAction;
-import com.android.hierarchyviewer.ui.action.RequestLayoutAction;
-import com.android.hierarchyviewer.ui.action.InvalidateAction;
-import com.android.hierarchyviewer.ui.action.CaptureNodeAction;
-import com.android.hierarchyviewer.ui.action.CaptureLayersAction;
-import com.android.hierarchyviewer.ui.action.RefreshWindowsAction;
-import com.android.hierarchyviewer.ui.action.StopServerAction;
-import com.android.hierarchyviewer.ui.action.StartServerAction;
-import com.android.hierarchyviewer.ui.action.ExitAction;
-import com.android.hierarchyviewer.ui.action.LoadGraphAction;
-import com.android.hierarchyviewer.ui.action.SaveSceneAction;
-import com.android.hierarchyviewer.ui.util.PngFileFilter;
-import com.android.hierarchyviewer.ui.util.IconLoader;
-import com.android.hierarchyviewer.ui.model.PropertiesTableModel;
-import com.android.hierarchyviewer.ui.model.ViewsTreeModel;
-import com.android.hierarchyviewer.ui.model.ProfilesTableModel;
-import org.jdesktop.swingworker.SwingWorker;
+
 import org.netbeans.api.visual.graph.layout.TreeGraphLayout;
 import org.netbeans.api.visual.model.ObjectSceneEvent;
 import org.netbeans.api.visual.model.ObjectSceneEventType;
 import org.netbeans.api.visual.model.ObjectSceneListener;
 import org.netbeans.api.visual.model.ObjectState;
 
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Image;
+import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.event.MouseWheelListener;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
 import javax.imageio.ImageIO;
 import javax.swing.ActionMap;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.ButtonGroup;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -71,56 +99,31 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
-import javax.swing.JScrollPane;
 import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
+import javax.swing.JTree;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
-import javax.swing.JTree;
-import javax.swing.Box;
-import javax.swing.JTextField;
-import javax.swing.text.Document;
-import javax.swing.text.BadLocationException;
-import javax.swing.tree.TreePath;
-import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.SwingWorker;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import javax.swing.event.TreeSelectionListener;
 import javax.swing.event.TreeSelectionEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.event.DocumentEvent;
+import javax.swing.event.TreeSelectionListener;
 import javax.swing.table.DefaultTableModel;
-import java.awt.image.BufferedImage;
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.GridBagLayout;
-import java.awt.GridBagConstraints;
-import java.awt.Insets;
-import java.awt.FlowLayout;
-import java.awt.Color;
-import java.awt.Image;
-import java.awt.Graphics2D;
-import java.awt.Component;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseWheelEvent;
-import java.awt.event.MouseWheelListener;
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
-import java.util.concurrent.ExecutionException;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.tree.TreePath;
 
 public class Workspace extends JFrame {
     private JLabel viewCountLabel;
@@ -145,6 +148,7 @@ public class Workspace extends JFrame {
     private JPanel mainPanel;
     private JProgressBar progress;
     private JToolBar buttonsPanel;
+    private JToolBar commandButtonsPanel;
 
     private JComponent deviceSelector;
     private DevicesTableModel devicesTableModel;
@@ -154,6 +158,7 @@ public class Workspace extends JFrame {
     private Window currentWindow = Window.FOCUSED_WINDOW;
 
     private JButton displayNodeButton;
+    private JButton dumpDisplayListButton;
     private JButton captureLayersButton;
     private JButton invalidateButton;
     private JButton requestLayoutButton;
@@ -202,6 +207,7 @@ public class Workspace extends JFrame {
         actionsMap.put(StopServerAction.ACTION_NAME, new StopServerAction(this));
         actionsMap.put(InvalidateAction.ACTION_NAME, new InvalidateAction(this));
         actionsMap.put(RequestLayoutAction.ACTION_NAME, new RequestLayoutAction(this));
+        actionsMap.put(DumpDisplayListAction.ACTION_NAME, new DumpDisplayListAction(this));
         actionsMap.put(CaptureNodeAction.ACTION_NAME, new CaptureNodeAction(this));
         actionsMap.put(CaptureLayersAction.ACTION_NAME, new CaptureLayersAction(this));
         actionsMap.put(RefreshWindowsAction.ACTION_NAME, new RefreshWindowsAction(this));
@@ -210,11 +216,12 @@ public class Workspace extends JFrame {
     private JComponent buildMainPanel() {
         mainPanel = new JPanel();
         mainPanel.setLayout(new BorderLayout());
-        mainPanel.add(buildToolBar(), BorderLayout.PAGE_START);
+        commandButtonsPanel = buildToolBar();
+        mainPanel.add(commandButtonsPanel, BorderLayout.PAGE_START);
         mainPanel.add(deviceSelector = buildDeviceSelector(), BorderLayout.CENTER);
         mainPanel.add(buildStatusPanel(), BorderLayout.SOUTH);
 
-        mainPanel.setPreferredSize(new Dimension(950, 800));
+        mainPanel.setPreferredSize(new Dimension(1200, 800));
 
         return mainPanel;
     }
@@ -481,6 +488,11 @@ public class Workspace extends JFrame {
         displayNodeButton.putClientProperty("JButton.segmentPosition", "first");
         toolBar.add(displayNodeButton);
 
+        dumpDisplayListButton = new JButton();
+        dumpDisplayListButton.setAction(actionsMap.get(DumpDisplayListAction.ACTION_NAME));
+        dumpDisplayListButton.putClientProperty("JButton.buttonType", "segmentedTextured");
+        dumpDisplayListButton.putClientProperty("JButton.segmentPosition", "middle");
+
         captureLayersButton = new JButton();
         captureLayersButton.setAction(actionsMap.get(CaptureLayersAction.ACTION_NAME));
         captureLayersButton.putClientProperty("JButton.buttonType", "segmentedTextured");
@@ -500,6 +512,17 @@ public class Workspace extends JFrame {
         toolBar.add(requestLayoutButton);
 
         return toolBar;
+    }
+
+    private void setupProtocolDependentToolbar() {
+        // Some functionality is only enabled in certain versions of the protocol.
+        // Add/remove those buttons here
+        if (protocolVersion < 4) {
+            commandButtonsPanel.remove(dumpDisplayListButton);
+        } else if (dumpDisplayListButton.getParent() == null) {
+            commandButtonsPanel.add(dumpDisplayListButton,
+                    commandButtonsPanel.getComponentCount() - 1);
+        }
     }
 
     private JMenuBar buildMenuBar() {
@@ -885,6 +908,7 @@ public class Workspace extends JFrame {
             displayNodeButton.setEnabled(false);
             captureLayersButton.setEnabled(false);
             invalidateButton.setEnabled(false);
+            dumpDisplayListButton.setEnabled(false);
             requestLayoutButton.setEnabled(false);
             graphViewButton.setEnabled(false);
             pixelPerfectViewButton.setEnabled(false);
@@ -914,6 +938,7 @@ public class Workspace extends JFrame {
             displayNodeButton.setEnabled(false);
             captureLayersButton.setEnabled(false);
             invalidateButton.setEnabled(false);
+            dumpDisplayListButton.setEnabled(false);
             graphViewButton.setEnabled(false);
             pixelPerfectViewButton.setEnabled(false);
             requestLayoutButton.setEnabled(false);
@@ -1008,6 +1033,13 @@ public class Workspace extends JFrame {
         return new CaptureNodeTask();
     }
     
+    public SwingWorker<?, ?> outputDisplayList() {
+        if (scene.getFocusedObject() == null) {
+            return null;
+        }
+        return new DumpDisplayListTask();
+    }
+
     public SwingWorker<?, ?> captureLayers() {
         JFileChooser chooser = new JFileChooser();
         chooser.setFileFilter(new PsdFileFilter());
@@ -1072,6 +1104,27 @@ public class Workspace extends JFrame {
         @WorkerThread
         protected Object doInBackground() throws Exception {
             ViewManager.invalidate(currentDevice, currentWindow, captureParams);
+            return null;
+        }
+
+        @Override
+        protected void done() {
+            endTask();
+        }
+    }
+
+    private class DumpDisplayListTask extends SwingWorker<Object, Void> {
+        private String captureParams;
+
+        private DumpDisplayListTask() {
+            captureParams = scene.getFocusedObject().toString();
+            beginTask();
+        }
+
+        @Override
+        @WorkerThread
+        protected Object doInBackground() throws Exception {
+            ViewManager.outputDisplayList(currentDevice, currentWindow, captureParams);
             return null;
         }
 
@@ -1182,7 +1235,7 @@ public class Workspace extends JFrame {
                 WindowsResult result = get();
                 protocolVersion = result.protocolVersion;
                 serverVersion = result.serverVersion;
-
+                setupProtocolDependentToolbar();
                 windowsTableModel.clear();
                 windowsTableModel.addWindows(result.windows);
             } catch (ExecutionException e) {
@@ -1324,6 +1377,7 @@ public class Workspace extends JFrame {
         public void focusChanged(ObjectSceneEvent e, Object oldFocus, Object newFocus) {
             displayNodeButton.setEnabled(true);
             invalidateButton.setEnabled(true);
+            dumpDisplayListButton.setEnabled(true);
             requestLayoutButton.setEnabled(true);
 
             Set<Object> selection = new HashSet<Object>();

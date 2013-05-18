@@ -16,6 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.launch;
 
+import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.debug.ui.AbstractLaunchConfigurationTabGroup;
 import org.eclipse.debug.ui.CommonTab;
 import org.eclipse.debug.ui.ILaunchConfigurationDialog;
@@ -29,10 +30,11 @@ public class LaunchConfigTabGroup extends AbstractLaunchConfigurationTabGroup {
     public LaunchConfigTabGroup() {
     }
 
+    @Override
     public void createTabs(ILaunchConfigurationDialog dialog, String mode) {
         ILaunchConfigurationTab[] tabs = new ILaunchConfigurationTab[] {
                 new MainLaunchConfigTab(),
-                new EmulatorConfigTab(),
+                new EmulatorConfigTab(ILaunchManager.RUN_MODE.equals(mode)),
                 new CommonTab()
             };
             setTabs(tabs);

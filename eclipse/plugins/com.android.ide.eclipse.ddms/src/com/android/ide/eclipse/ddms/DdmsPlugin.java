@@ -16,25 +16,37 @@
 
 package com.android.ide.eclipse.ddms;
 
+import com.android.annotations.NonNull;
 import com.android.ddmlib.AndroidDebugBridge;
+import com.android.ddmlib.AndroidDebugBridge.IDeviceChangeListener;
 import com.android.ddmlib.Client;
-import com.android.ddmlib.DdmConstants;
 import com.android.ddmlib.DdmPreferences;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.Log;
-import com.android.ddmlib.AndroidDebugBridge.IDeviceChangeListener;
 import com.android.ddmlib.Log.ILogOutput;
 import com.android.ddmlib.Log.LogLevel;
 import com.android.ddmuilib.DdmUiPreferences;
 import com.android.ddmuilib.DevicePanel.IUiSelectionListener;
+import com.android.ddmuilib.StackTracePanel;
+import com.android.ddmuilib.console.DdmConsole;
+import com.android.ddmuilib.console.IDdmConsole;
+import com.android.ide.eclipse.ddms.i18n.Messages;
 import com.android.ide.eclipse.ddms.preferences.PreferenceInitializer;
-import com.android.ide.eclipse.ddms.views.DeviceView;
 
-import org.eclipse.core.runtime.Preferences;
-import org.eclipse.core.runtime.Preferences.IPropertyChangeListener;
-import org.eclipse.core.runtime.Preferences.PropertyChangeEvent;
+import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IConfigurationElement;
+import org.eclipse.core.runtime.IExtensionPoint;
+import org.eclipse.core.runtime.IExtensionRegistry;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.jface.resource.ImageDescriptor;
+import org.eclipse.jface.util.IPropertyChangeListener;
+import org.eclipse.jface.util.PropertyChangeEvent;
 import org.eclipse.swt.SWTException;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.widgets.Display;
@@ -50,18 +62,18 @@ import org.osgi.framework.BundleContext;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * The activator class controls the plug-in life cycle
  */
 public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeListener,
-        IUiSelectionListener {
+        IUiSelectionListener, com.android.ddmuilib.StackTracePanel.ISourceRevealer {
 
 
     // The plug-in ID
-    public static final String PLUGIN_ID = "com.android.ide.eclipse.ddms"; // $NON-NLS-1$
-
-    private static final String ADB_LOCATION = PLUGIN_ID + ".adb"; // $NON-NLS-1$
+    public static final String PLUGIN_ID = "com.android.ide.eclipse.ddms"; //$NON-NLS-1$
 
     /** The singleton instance */
     private static DdmsPlugin sPlugin;
@@ -71,11 +83,13 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
     private static String sToolsFolder;
     private static String sHprofConverter;
 
-    /**
-     * Debug Launcher for already running apps
+    private boolean mHasDebuggerConnectors;
+    /** debugger connectors for already running apps.
+     * Initialized from an extension point.
      */
-    private static IDebugLauncher sRunningAppDebugLauncher;
-
+    private IDebuggerConnector[] mDebuggerConnectors;
+    private ITraceviewLauncher[] mTraceviewLaunchers;
+    private List<IClientAction> mClientSpecificActions = null;
 
     /** Console for DDMS log message */
     private MessageConsole mDdmsConsole;
@@ -88,14 +102,6 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
 
     private Color mRed;
 
-    private boolean mDdmlibInitialized;
-
-    /**
-     * Interface to provide debugger launcher for running apps.
-     */
-    public interface IDebugLauncher {
-        public boolean debug(String packageName, int port);
-    }
 
     /**
      * Classes which implement this interface provide methods that deals
@@ -144,7 +150,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
         //DdmUiPreferences.displayCharts();
 
         // set the consoles.
-        mDdmsConsole = new MessageConsole("DDMS", null); // $NON-NLS-1$
+        mDdmsConsole = new MessageConsole("DDMS", null); //$NON-NLS-1$
         ConsolePlugin.getDefault().getConsoleManager().addConsoles(
                 new IConsole[] {
                     mDdmsConsole
@@ -158,6 +164,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
         // changing the console properties update the UI, we need to make this change
         // in the UI thread.
         display.asyncExec(new Runnable() {
+            @Override
             public void run() {
                 errorConsoleStream.setColor(mRed);
             }
@@ -165,20 +172,23 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
 
         // set up the ddms log to use the ddms console.
         Log.setLogOutput(new ILogOutput() {
+            @Override
             public void printLog(LogLevel logLevel, String tag, String message) {
                 if (logLevel.getPriority() >= LogLevel.ERROR.getPriority()) {
                     printToStream(errorConsoleStream, tag, message);
-                    ConsolePlugin.getDefault().getConsoleManager().showConsoleView(mDdmsConsole);
+                    showConsoleView(mDdmsConsole);
                 } else {
                     printToStream(consoleStream, tag, message);
                 }
             }
 
+            @Override
             public void printAndPromptLog(final LogLevel logLevel, final String tag,
                     final String message) {
                 printLog(logLevel, tag, message);
                 // dialog box only run in UI thread..
                 display.asyncExec(new Runnable() {
+                    @Override
                     public void run() {
                         Shell shell = display.getActiveShell();
                         if (logLevel == LogLevel.ERROR) {
@@ -192,9 +202,35 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
 
         });
 
+        // set up the ddms console to use this objects
+        DdmConsole.setConsole(new IDdmConsole() {
+            @Override
+            public void printErrorToConsole(String message) {
+                printToStream(errorConsoleStream, null, message);
+                showConsoleView(mDdmsConsole);
+            }
+            @Override
+            public void printErrorToConsole(String[] messages) {
+                for (String m : messages) {
+                    printToStream(errorConsoleStream, null, m);
+                }
+                showConsoleView(mDdmsConsole);
+            }
+            @Override
+            public void printToConsole(String message) {
+                printToStream(consoleStream, null, message);
+            }
+            @Override
+            public void printToConsole(String[] messages) {
+                for (String m : messages) {
+                    printToStream(consoleStream, null, m);
+                }
+            }
+        });
+
         // set the listener for the preference change
-        Preferences prefs = getPluginPreferences();
-        prefs.addPropertyChangeListener(new IPropertyChangeListener() {
+        eclipseStore.addPropertyChangeListener(new IPropertyChangeListener() {
+            @Override
             public void propertyChange(PropertyChangeEvent event) {
                 // get the name of the property that changed.
                 String property = event.getProperty();
@@ -214,27 +250,206 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
                 } else if (PreferenceInitializer.ATTR_TIME_OUT.equals(property)) {
                     DdmPreferences.setTimeOut(
                             eclipseStore.getInt(PreferenceInitializer.ATTR_TIME_OUT));
+                } else if (PreferenceInitializer.ATTR_USE_ADBHOST.equals(property)) {
+                    DdmPreferences.setUseAdbHost(
+                            eclipseStore.getBoolean(PreferenceInitializer.ATTR_USE_ADBHOST));
+                } else if (PreferenceInitializer.ATTR_ADBHOST_VALUE.equals(property)) {
+                    DdmPreferences.setAdbHostValue(
+                            eclipseStore.getString(PreferenceInitializer.ATTR_ADBHOST_VALUE));
                 }
             }
         });
 
-        // read the adb location from the prefs to attempt to start it properly without
-        // having to wait for ADT to start
-        final boolean adbValid = setAdbLocation(eclipseStore.getString(ADB_LOCATION));
+        // do some last initializations
 
-        // start it in a thread to return from start() asap.
-        new Thread() {
+        // set the preferences.
+        PreferenceInitializer.setupPreferences();
+
+        // this class is set as the main source revealer and will look at all the implementations
+        // of the extension point. see #reveal(String, String, int)
+        StackTracePanel.setSourceRevealer(this);
+
+        /*
+         * Load the extension point implementations.
+         * The first step is to load the IConfigurationElement representing the implementations.
+         * The 2nd step is to use these objects to instantiate the implementation classes.
+         *
+         * Because the 2nd step will trigger loading the plug-ins providing the implementations,
+         * and those plug-ins could access DDMS classes (like ADT), this 2nd step should be done
+         * in a Job to ensure that DDMS is loaded, so that the other plug-ins can load.
+         *
+         * Both steps could be done in the 2nd step but some of DDMS UI rely on knowing if there
+         * is an implementation or not (DeviceView), so we do the first steps in start() and, in
+         * some case, record it.
+         *
+         */
+
+        // get the IConfigurationElement for the debuggerConnector right away.
+        final IConfigurationElement[] dcce = findConfigElements(
+                "com.android.ide.eclipse.ddms.debuggerConnector"); //$NON-NLS-1$
+        mHasDebuggerConnectors = dcce.length > 0;
+
+        // get the other configElements and instantiante them in a Job.
+        new Job(Messages.DdmsPlugin_DDMS_Post_Create_Init) {
             @Override
-            public void run() {
-                // init ddmlib if needed
-                getDefault().initDdmlib();
+            protected IStatus run(IProgressMonitor monitor) {
+                try {
+                    // init the lib
+                    AndroidDebugBridge.init(true /* debugger support */);
 
-                // create and start the first bridge
-                if (adbValid) {
-                    AndroidDebugBridge.createBridge(sAdbLocation, true /* forceNewBridge */);
+                    // get the available adb locators
+                    IConfigurationElement[] elements = findConfigElements(
+                            "com.android.ide.eclipse.ddms.toolsLocator"); //$NON-NLS-1$
+
+                    IToolsLocator[] locators = instantiateToolsLocators(elements);
+
+                    for (IToolsLocator locator : locators) {
+                        try {
+                            String adbLocation = locator.getAdbLocation();
+                            String traceviewLocation = locator.getTraceViewLocation();
+                            String hprofConvLocation = locator.getHprofConvLocation();
+                            if (adbLocation != null && traceviewLocation != null &&
+                                    hprofConvLocation != null) {
+                                // checks if the location is valid.
+                                if (setToolsLocation(adbLocation, hprofConvLocation,
+                                        traceviewLocation)) {
+
+                                    AndroidDebugBridge.createBridge(sAdbLocation,
+                                            true /* forceNewBridge */);
+
+                                    // no need to look at the other locators.
+                                    break;
+                                }
+                            }
+                        } catch (Throwable t) {
+                            // ignore, we'll just not use this implementation.
+                        }
+                    }
+
+                    // get the available debugger connectors
+                    mDebuggerConnectors = instantiateDebuggerConnectors(dcce);
+
+                    // get the available Traceview Launchers.
+                    elements = findConfigElements("com.android.ide.eclipse.ddms.traceviewLauncher"); //$NON-NLS-1$
+                    mTraceviewLaunchers = instantiateTraceviewLauncher(elements);
+
+                    return Status.OK_STATUS;
+                } catch (CoreException e) {
+                    return e.getStatus();
                 }
             }
-        }.start();
+        }.schedule();
+    }
+
+    private void showConsoleView(MessageConsole console) {
+        ConsolePlugin.getDefault().getConsoleManager().showConsoleView(console);
+    }
+
+
+    /** Obtain a list of configuration elements that extend the given extension point. */
+    IConfigurationElement[] findConfigElements(String extensionPointId) {
+        // get the adb location from an implementation of the ADB Locator extension point.
+        IExtensionRegistry extensionRegistry = Platform.getExtensionRegistry();
+        IExtensionPoint extensionPoint = extensionRegistry.getExtensionPoint(extensionPointId);
+        if (extensionPoint != null) {
+            return extensionPoint.getConfigurationElements();
+        }
+
+        // shouldn't happen or it means the plug-in is broken.
+        return new IConfigurationElement[0];
+    }
+
+    /**
+     * Finds if any other plug-in is extending the exposed Extension Point called adbLocator.
+     *
+     * @return an array of all locators found, or an empty array if none were found.
+     */
+    private IToolsLocator[] instantiateToolsLocators(IConfigurationElement[] configElements)
+            throws CoreException {
+        ArrayList<IToolsLocator> list = new ArrayList<IToolsLocator>();
+
+        if (configElements.length > 0) {
+            // only use the first one, ignore the others.
+            IConfigurationElement configElement = configElements[0];
+
+            // instantiate the class
+            Object obj = configElement.createExecutableExtension("class"); //$NON-NLS-1$
+            if (obj instanceof IToolsLocator) {
+                list.add((IToolsLocator) obj);
+            }
+        }
+
+        return list.toArray(new IToolsLocator[list.size()]);
+    }
+
+    /**
+     * Finds if any other plug-in is extending the exposed Extension Point called debuggerConnector.
+     *
+     * @return an array of all locators found, or an empty array if none were found.
+     */
+    private IDebuggerConnector[] instantiateDebuggerConnectors(
+            IConfigurationElement[] configElements) throws CoreException {
+        ArrayList<IDebuggerConnector> list = new ArrayList<IDebuggerConnector>();
+
+        if (configElements.length > 0) {
+            // only use the first one, ignore the others.
+            IConfigurationElement configElement = configElements[0];
+
+            // instantiate the class
+            Object obj = configElement.createExecutableExtension("class"); //$NON-NLS-1$
+            if (obj instanceof IDebuggerConnector) {
+                list.add((IDebuggerConnector) obj);
+            }
+        }
+
+        return list.toArray(new IDebuggerConnector[list.size()]);
+    }
+
+    /**
+     * Finds if any other plug-in is extending the exposed Extension Point called traceviewLauncher.
+     *
+     * @return an array of all locators found, or an empty array if none were found.
+     */
+    private ITraceviewLauncher[] instantiateTraceviewLauncher(
+            IConfigurationElement[] configElements)
+            throws CoreException {
+        ArrayList<ITraceviewLauncher> list = new ArrayList<ITraceviewLauncher>();
+
+        if (configElements.length > 0) {
+            // only use the first one, ignore the others.
+            IConfigurationElement configElement = configElements[0];
+
+            // instantiate the class
+            Object obj = configElement.createExecutableExtension("class"); //$NON-NLS-1$
+            if (obj instanceof ITraceviewLauncher) {
+                list.add((ITraceviewLauncher) obj);
+            }
+        }
+
+        return list.toArray(new ITraceviewLauncher[list.size()]);
+    }
+
+    /**
+     * Returns the classes that implement {@link IClientAction} in each of the extensions that
+     * extend clientAction extension point.
+     * @throws CoreException
+     */
+    private List<IClientAction> instantiateClientSpecificActions(IConfigurationElement[] elements)
+            throws CoreException {
+        if (elements == null || elements.length == 0) {
+            return Collections.emptyList();
+        }
+
+        List<IClientAction> extensions = new ArrayList<IClientAction>(1);
+
+        for (IConfigurationElement e : elements) {
+            Object o = e.createExecutableExtension("class"); //$NON-NLS-1$
+            if (o instanceof IClientAction) {
+                extensions.add((IClientAction) o);
+            }
+        }
+
+        return extensions;
     }
 
     public static Display getDisplay() {
@@ -286,24 +501,39 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
     /**
      * Stores the adb location. This returns true if the location is an existing file.
      */
-    private static boolean setAdbLocation(String adbLocation) {
+    private static boolean setToolsLocation(String adbLocation, String hprofConvLocation,
+            String traceViewLocation) {
+
         File adb = new File(adbLocation);
-        if (adb.isFile()) {
-            sAdbLocation = adbLocation;
+        File hprofConverter = new File(hprofConvLocation);
+        File traceview = new File(traceViewLocation);
 
-            File toolsFolder = adb.getParentFile();
-            sToolsFolder = toolsFolder.getAbsolutePath();
-
-            File hprofConverter = new File(toolsFolder, DdmConstants.FN_HPROF_CONVERTER);
-            sHprofConverter = hprofConverter.getAbsolutePath();
-
-            File traceview = new File(toolsFolder, DdmConstants.FN_TRACEVIEW);
-            DdmUiPreferences.setTraceviewLocation(traceview.getAbsolutePath());
-
-            return true;
+        String missing = "";
+        if (adb.isFile() == false) {
+            missing += adb.getAbsolutePath() + " ";
+        }
+        if (hprofConverter.isFile() == false) {
+            missing += hprofConverter.getAbsolutePath() + " ";
+        }
+        if (traceview.isFile() == false) {
+            missing += traceview.getAbsolutePath() + " ";
         }
 
-        return false;
+        if (missing.length() > 0) {
+            String msg = String.format("DDMS files not found: %1$s", missing);
+            Log.e("DDMS", msg);
+            Status status = new Status(IStatus.ERROR, PLUGIN_ID, msg, null /*exception*/);
+            getDefault().getLog().log(status);
+            return false;
+        }
+
+        sAdbLocation = adbLocation;
+        sHprofConverter = hprofConverter.getAbsolutePath();
+        DdmUiPreferences.setTraceviewLocation(traceview.getAbsolutePath());
+
+        sToolsFolder = traceview.getParent();
+
+        return true;
     }
 
     /**
@@ -311,67 +541,50 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
      * @param adb location of adb
      * @param startAdb flag to start adb
      */
-    public static void setAdb(String adb, boolean startAdb) {
-        if (adb != null) {
-            if (setAdbLocation(adb)) {
-                // store the location for future ddms only start.
-                sPlugin.getPreferenceStore().setValue(ADB_LOCATION, sAdbLocation);
+    public static void setToolsLocation(String adbLocation, boolean startAdb,
+            String hprofConvLocation, String traceViewLocation) {
 
-                // starts the server in a thread in case this is blocking.
-                if (startAdb) {
-                    new Thread() {
-                        @Override
-                        public void run() {
-                            // init ddmlib if needed
-                            getDefault().initDdmlib();
-
-                            // create and start the bridge
+        if (setToolsLocation(adbLocation, hprofConvLocation, traceViewLocation)) {
+            // starts the server in a thread in case this is blocking.
+            if (startAdb) {
+                new Thread() {
+                    @Override
+                    public void run() {
+                        // create and start the bridge
+                        try {
                             AndroidDebugBridge.createBridge(sAdbLocation,
                                     false /* forceNewBridge */);
+                        } catch (Throwable t) {
+                            Status status = new Status(IStatus.ERROR, PLUGIN_ID,
+                                    "Failed to create AndroidDebugBridge", t);
+                            getDefault().getLog().log(status);
                         }
-                    }.start();
-                }
+                    }
+                }.start();
             }
         }
     }
 
-    private synchronized void initDdmlib() {
-        if (mDdmlibInitialized == false) {
-            // set the preferences.
-            PreferenceInitializer.setupPreferences();
-
-            // init the lib
-            AndroidDebugBridge.init(true /* debugger support */);
-
-            mDdmlibInitialized = true;
-        }
+    /**
+     * Returns whether there are implementations of the debuggerConnectors extension point.
+     * <p/>
+     * This is guaranteed to return the correct value as soon as the plug-in is loaded.
+     */
+    public boolean hasDebuggerConnectors() {
+        return mHasDebuggerConnectors;
     }
 
     /**
-     * Sets the launcher responsible for connecting the debugger to running applications.
-     * @param launcher The launcher.
+     * Returns the implementations of {@link IDebuggerConnector}.
+     * <p/>
+     * There may be a small amount of time right after the plug-in load where this can return
+     * null even if there are implementation.
+     * <p/>
+     * Since the use of the implementation likely require user input, the UI can use
+     * {@link #hasDebuggerConnectors()} to know if there are implementations before they are loaded.
      */
-    public static void setRunningAppDebugLauncher(IDebugLauncher launcher) {
-        sRunningAppDebugLauncher = launcher;
-
-        // if the process view is already running, give it the launcher.
-        // This method could be called from a non ui thread, so we make sure to do that
-        // in the ui thread.
-        Display display = getDisplay();
-        if (display != null && display.isDisposed() == false) {
-            display.asyncExec(new Runnable() {
-                public void run() {
-                    DeviceView dv = DeviceView.getInstance();
-                    if (dv != null) {
-                        dv.setDebugLauncher(sRunningAppDebugLauncher);
-                    }
-                }
-            });
-        }
-    }
-
-    public static IDebugLauncher getRunningAppDebugLauncher() {
-        return sRunningAppDebugLauncher;
+    public IDebuggerConnector[] getDebuggerConnectors() {
+        return mDebuggerConnectors;
     }
 
     public synchronized void addSelectionListener(ISelectionListener listener) {
@@ -398,6 +611,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
      *
      * @see IDeviceChangeListener#deviceConnected(IDevice)
      */
+    @Override
     public void deviceConnected(IDevice device) {
         // if we are listening to selection coming from the ui, then we do nothing, as
         // any change in the devices/clients, will be handled by the UI, and we'll receive
@@ -417,6 +631,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
      *
      * @see IDeviceChangeListener#deviceDisconnected(IDevice)
      */
+    @Override
     public void deviceDisconnected(IDevice device) {
         // if we are listening to selection coming from the ui, then we do nothing, as
         // any change in the devices/clients, will be handled by the UI, and we'll receive
@@ -452,6 +667,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
      *
      * @see IDeviceChangeListener#deviceChanged(IDevice)
      */
+    @Override
     public void deviceChanged(IDevice device, int changeMask) {
         // if we are listening to selection coming from the ui, then we do nothing, as
         // any change in the devices/clients, will be handled by the UI, and we'll receive
@@ -488,6 +704,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
      * @param selectedDevice the selected device. If null, no devices are selected.
      * @param selectedClient The selected client. If null, no clients are selected.
      */
+    @Override
     public synchronized void selectionChanged(IDevice selectedDevice, Client selectedClient) {
         if (mCurrentDevice != selectedDevice) {
             mCurrentDevice = selectedDevice;
@@ -519,6 +736,7 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
             Display display = getDisplay();
 
             display.asyncExec(new Runnable() {
+                @Override
                 public void run() {
                     // set the new device if different.
                     boolean newDevice = false;
@@ -574,6 +792,9 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
         String dateTag = getMessageTag(tag);
 
         stream.print(dateTag);
+        if (!dateTag.endsWith(" ")) {
+            stream.print(" ");          //$NON-NLS-1$
+        }
         stream.println(message);
     }
 
@@ -586,9 +807,66 @@ public final class DdmsPlugin extends AbstractUIPlugin implements IDeviceChangeL
         Calendar c = Calendar.getInstance();
 
         if (tag == null) {
-            return String.format("[%1$tF %1$tT]", c);
+            return String.format(Messages.DdmsPlugin_Message_Tag_Mask_1, c);
         }
 
-        return String.format("[%1$tF %1$tT - %2$s]", c, tag);
+        return String.format(Messages.DdmsPlugin_Message_Tag_Mask_2, c, tag);
+    }
+
+    /**
+     * Implementation of com.android.ddmuilib.StackTracePanel.ISourceRevealer.
+     */
+    @Override
+    public void reveal(String applicationName, String className, int line) {
+        JavaSourceRevealer.reveal(applicationName, className, line);
+    }
+
+    public boolean launchTraceview(String osPath) {
+        if (mTraceviewLaunchers != null) {
+            for (ITraceviewLauncher launcher : mTraceviewLaunchers) {
+                try {
+                    if (launcher.openFile(osPath)) {
+                        return true;
+                    }
+                } catch (Throwable t) {
+                    // ignore, we'll just not use this implementation.
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns the list of clients that extend the clientAction extension point.
+     */
+    @NonNull
+    public synchronized List<IClientAction> getClientSpecificActions() {
+        if (mClientSpecificActions == null) {
+            // get available client specific action extensions
+            IConfigurationElement[] elements =
+                    findConfigElements("com.android.ide.eclipse.ddms.clientAction"); //$NON-NLS-1$
+            try {
+                mClientSpecificActions = instantiateClientSpecificActions(elements);
+            } catch (CoreException e) {
+                mClientSpecificActions = Collections.emptyList();
+            }
+        }
+
+        return mClientSpecificActions;
+    }
+
+    private LogCatMonitor mLogCatMonitor;
+    public void startLogCatMonitor(IDevice device) {
+        if (mLogCatMonitor == null) {
+            mLogCatMonitor = new LogCatMonitor(getDebuggerConnectors(), getPreferenceStore());
+        }
+
+        mLogCatMonitor.monitorDevice(device);
+    }
+
+    /** Returns an image descriptor for the image file at the given plug-in relative path */
+    public static ImageDescriptor getImageDescriptor(String path) {
+        return imageDescriptorFromPlugin(PLUGIN_ID, path);
     }
 }

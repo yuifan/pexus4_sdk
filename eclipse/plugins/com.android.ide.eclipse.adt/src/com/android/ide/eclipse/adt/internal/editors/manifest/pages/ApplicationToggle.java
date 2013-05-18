@@ -21,9 +21,10 @@ import com.android.ide.eclipse.adt.internal.editors.descriptors.DescriptorsUtils
 import com.android.ide.eclipse.adt.internal.editors.manifest.ManifestEditor;
 import com.android.ide.eclipse.adt.internal.editors.ui.UiElementPart;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.IUiUpdateListener;
-import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.IUiUpdateListener.UiUpdateState;
+import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
+import com.android.utils.SdkUtils;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.SelectionAdapter;
@@ -43,8 +44,8 @@ import org.w3c.dom.Text;
  * Appllication Toogle section part for application page.
  */
 final class ApplicationToggle extends UiElementPart {
-    
-    /** Checkbox indicating whether an application node is present */ 
+
+    /** Checkbox indicating whether an application node is present */
     private Button mCheckbox;
     /** Listen to changes to the UI node for <application> and updates the checkbox */
     private AppNodeUpdateListener mAppNodeUpdateListener;
@@ -60,7 +61,7 @@ final class ApplicationToggle extends UiElementPart {
                 null, /* description */
                 Section.TWISTIE | Section.EXPANDED);
     }
-    
+
     @Override
     public void dispose() {
         super.dispose();
@@ -69,7 +70,7 @@ final class ApplicationToggle extends UiElementPart {
             mAppNodeUpdateListener = null;
         }
     }
-    
+
     /**
      * Changes and refreshes the Application UI node handle by the this part.
      */
@@ -89,7 +90,7 @@ final class ApplicationToggle extends UiElementPart {
      * <p/>
      * This MUST not be called by the constructor. Instead it must be called from
      * <code>initialize</code> (i.e. right after the form part is added to the managed form.)
-     * 
+     *
      * @param managedForm The owner managed form
      */
     @Override
@@ -114,14 +115,14 @@ final class ApplicationToggle extends UiElementPart {
         // Initialize the state of the checkbox
         mAppNodeUpdateListener.uiElementNodeUpdated(getUiElementNode(),
                 UiUpdateState.CHILDREN_CHANGED);
-        
+
         // Tell the section that the layout has changed.
         layoutChanged();
     }
 
     /**
      * Updates the application tooltip in the form text.
-     * If there is no tooltip, the form text is hidden. 
+     * If there is no tooltip, the form text is hidden.
      */
     private void updateTooltip() {
         boolean isVisible = false;
@@ -131,13 +132,13 @@ final class ApplicationToggle extends UiElementPart {
             tooltip = DescriptorsUtils.formatFormText(tooltip,
                     getUiElementNode().getDescriptor(),
                     Sdk.getCurrent().getDocumentationBaseUrl());
-    
+
             mTooltipFormText.setText(tooltip, true /* parseTags */, true /* expandURLs */);
             mTooltipFormText.setImage(DescriptorsUtils.IMAGE_KEY, AdtPlugin.getAndroidLogo());
             mTooltipFormText.addHyperlinkListener(getEditor().createHyperlinkListener());
             isVisible = true;
         }
-        
+
         mTooltipFormText.setVisible(isVisible);
     }
 
@@ -156,31 +157,28 @@ final class ApplicationToggle extends UiElementPart {
         public void widgetSelected(SelectionEvent e) {
             super.widgetSelected(e);
             if (!mInternalModification && getUiElementNode() != null) {
-                getUiElementNode().getEditor().wrapUndoRecording(
+                getUiElementNode().getEditor().wrapUndoEditXmlModel(
                         mCheckbox.getSelection()
                             ? "Create or restore Application node"
                             : "Remove Application node",
                         new Runnable() {
+                            @Override
                             public void run() {
-                                getUiElementNode().getEditor().editXmlModel(new Runnable() {
-                                    public void run() {
-                                        if (mCheckbox.getSelection()) {
-                                            // The user wants an <application> node.
-                                            // Either restore a previous one
-                                            // or create a full new one.
-                                            boolean create = true;
-                                            if (mUndoXmlNode != null) {
-                                                create = !restoreApplicationNode();
-                                            }
-                                            if (create) {
-                                                getUiElementNode().createXmlNode();
-                                            }
-                                        } else {
-                                            // Users no longer wants the <application> node.
-                                            removeApplicationNode();
-                                        }
+                                if (mCheckbox.getSelection()) {
+                                    // The user wants an <application> node.
+                                    // Either restore a previous one
+                                    // or create a full new one.
+                                    boolean create = true;
+                                    if (mUndoXmlNode != null) {
+                                        create = !restoreApplicationNode();
                                     }
-                                });
+                                    if (create) {
+                                        getUiElementNode().createXmlNode();
+                                    }
+                                } else {
+                                    // Users no longer wants the <application> node.
+                                    removeApplicationNode();
+                                }
                             }
                 });
             }
@@ -188,7 +186,7 @@ final class ApplicationToggle extends UiElementPart {
 
         /**
          * Restore a previously "saved" application node.
-         * 
+         *
          * @return True if the node could be restored, false otherwise.
          */
         private boolean restoreApplicationNode() {
@@ -222,11 +220,11 @@ final class ApplicationToggle extends UiElementPart {
                 }
                 mUndoXmlParent.insertBefore(mUndoXmlNode, next);
                 if (next == null) {
-                    Text sep = mUndoXmlDocument.createTextNode("\n");  //$NON-NLS-1$
+                    Text sep = mUndoXmlDocument.createTextNode(SdkUtils.getLineSeparator());
                     mUndoXmlParent.insertBefore(sep, null);  // insert separator before end tag
                 }
                 success = true;
-            } 
+            }
 
             // Remove internal references to avoid using them twice
             mUndoXmlParent = null;
@@ -239,8 +237,8 @@ final class ApplicationToggle extends UiElementPart {
 
         /**
          * Validates that the given xml_node is still either the root node or one of its
-         * direct descendants. 
-         * 
+         * direct descendants.
+         *
          * @param root_node The root of the node hierarchy to examine.
          * @param xml_node The XML node to find.
          * @return Returns xml_node if it is, otherwise returns null.
@@ -291,7 +289,8 @@ final class ApplicationToggle extends UiElementPart {
      * This listener synchronizes the UI (i.e. the checkbox) with the
      * actual presence of the application XML node.
      */
-    private class AppNodeUpdateListener implements IUiUpdateListener {        
+    private class AppNodeUpdateListener implements IUiUpdateListener {
+        @Override
         public void uiElementNodeUpdated(UiElementNode ui_node, UiUpdateState state) {
             // The UiElementNode for the application XML node always exists, even
             // if there is no corresponding XML node in the XML file.
@@ -307,7 +306,7 @@ final class ApplicationToggle extends UiElementPart {
             } finally {
                 mInternalModification = false;
             }
-            
+
         }
     }
 }

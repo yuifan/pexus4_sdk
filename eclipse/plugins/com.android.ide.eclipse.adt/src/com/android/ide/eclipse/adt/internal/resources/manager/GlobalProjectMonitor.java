@@ -16,6 +16,11 @@
 
 package com.android.ide.eclipse.adt.internal.resources.manager;
 
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.ide.common.resources.ResourceFile;
+import com.android.ide.common.resources.ResourceFolder;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.project.BaseProjectHelper;
 
@@ -63,12 +68,19 @@ public final class GlobalProjectMonitor {
     public interface IFileListener {
         /**
          * Sent when a file changed.
+         *
          * @param file The file that changed.
          * @param markerDeltas The marker deltas for the file.
          * @param kind The change kind. This is equivalent to
-         * {@link IResourceDelta#accept(IResourceDeltaVisitor)}
+         *            {@link IResourceDelta#accept(IResourceDeltaVisitor)}
+         * @param extension the extension of the file or null if the file does
+         *            not have an extension
+         * @param flags the {@link IResourceDelta#getFlags()} value with details
+         *            on what changed in the file
+         * @param isAndroidProject whether the parent project is an Android Project
          */
-        public void fileChanged(IFile file, IMarkerDelta[] markerDeltas, int kind);
+        public void fileChanged(@NonNull IFile file, @NonNull IMarkerDelta[] markerDeltas,
+                int kind, @Nullable String extension, int flags, boolean isAndroidProject);
     }
 
     /**
@@ -80,16 +92,28 @@ public final class GlobalProjectMonitor {
          * @param project the opened project.
          */
         public void projectOpenedWithWorkspace(IProject project);
+
+        /**
+         * Sent once after all Android projects have been opened,
+         * at the time the listener is put in place.
+         * <p/>
+         * This is called after {@link #projectOpenedWithWorkspace(IProject)} has
+         * been called on all known Android projects.
+         */
+        public void allProjectsOpenedWithWorkspace();
+
         /**
          * Sent when a project is opened.
          * @param project the project being opened.
          */
         public void projectOpened(IProject project);
+
         /**
          * Sent when a project is closed.
          * @param project the project being closed.
          */
         public void projectClosed(IProject project);
+
         /**
          * Sent when a project is deleted.
          * @param project the project about to be deleted.
@@ -116,8 +140,9 @@ public final class GlobalProjectMonitor {
          * Sent when a folder changed.
          * @param folder The file that was changed
          * @param kind The change kind. This is equivalent to {@link IResourceDelta#getKind()}
+         * @param isAndroidProject whether the parent project is an Android Project
          */
-        public void folderChanged(IFolder folder, int kind);
+        public void folderChanged(IFolder folder, int kind, boolean isAndroidProject);
     }
 
     /**
@@ -126,6 +151,13 @@ public final class GlobalProjectMonitor {
     public interface IResourceEventListener {
         public void resourceChangeEventStart();
         public void resourceChangeEventEnd();
+    }
+
+    /**
+     * Interface for a listener that gets passed the raw delta without processing.
+     */
+    public interface IRawDeltaListener {
+        public void visitDelta(IResourceDelta delta);
     }
 
     /**
@@ -174,14 +206,21 @@ public final class GlobalProjectMonitor {
     private final ArrayList<IResourceEventListener> mEventListeners =
         new ArrayList<IResourceEventListener>();
 
+    private final ArrayList<IRawDeltaListener> mRawDeltaListeners =
+        new ArrayList<IRawDeltaListener>();
+
     private IWorkspace mWorkspace;
+
+    private boolean mIsAndroidProject;
 
     /**
      * Delta visitor for resource changes.
      */
     private final class DeltaVisitor implements IResourceDeltaVisitor {
 
+        @Override
         public boolean visit(IResourceDelta delta) {
+            // Find the other resource listeners to notify
             IResource r = delta.getResource();
             int type = r.getType();
             if (type == IResource.FILE) {
@@ -191,7 +230,8 @@ public final class GlobalProjectMonitor {
                     if (bundle.kindMask == ListenerBundle.MASK_NONE
                             || (bundle.kindMask & kind) != 0) {
                         try {
-                            bundle.listener.fileChanged((IFile)r, delta.getMarkerDeltas(), kind);
+                            bundle.listener.fileChanged((IFile)r, delta.getMarkerDeltas(), kind,
+                                    r.getFileExtension(), delta.getFlags(), mIsAndroidProject);
                         } catch (Throwable t) {
                             AdtPlugin.log(t,"Failed to call IFileListener.fileChanged");
                         }
@@ -205,7 +245,7 @@ public final class GlobalProjectMonitor {
                     if (bundle.kindMask == ListenerBundle.MASK_NONE
                             || (bundle.kindMask & kind) != 0) {
                         try {
-                            bundle.listener.folderChanged((IFolder)r, kind);
+                            bundle.listener.folderChanged((IFolder)r, kind, mIsAndroidProject);
                         } catch (Throwable t) {
                             AdtPlugin.log(t,"Failed to call IFileListener.folderChanged");
                         }
@@ -213,11 +253,27 @@ public final class GlobalProjectMonitor {
                 }
                 return true;
             } else if (type == IResource.PROJECT) {
+                IProject project = (IProject)r;
+
+                try {
+                    mIsAndroidProject = project.hasNature(AdtConstants.NATURE_DEFAULT);
+                } catch (CoreException e) {
+                    // this can only happen if the project does not exist or is not open, neither
+                    // of which can happen here since we are processing changes in the project
+                    // or at worst a project post-open event.
+                    return false;
+                }
+
+                if (mIsAndroidProject == false) {
+                    // for non android project, skip the project listeners but return true
+                    // to visit the children and notify the IFileListeners
+                    return true;
+                }
+
                 int flags = delta.getFlags();
 
                 if ((flags & IResourceDelta.OPEN) != 0) {
                     // the project is opening or closing.
-                    IProject project = (IProject)r;
 
                     if (project.isOpen()) {
                         // notify the listeners.
@@ -364,9 +420,16 @@ public final class GlobalProjectMonitor {
         IJavaProject[] androidProjects = BaseProjectHelper.getAndroidProjects(javaModel,
                 null /*filter*/);
 
+
+        notifyResourceEventStart();
+
         for (IJavaProject androidProject : androidProjects) {
             listener.projectOpenedWithWorkspace(androidProject.getProject());
         }
+
+        listener.allProjectsOpenedWithWorkspace();
+
+        notifyResourceEventEnd();
     }
 
     /**
@@ -393,21 +456,52 @@ public final class GlobalProjectMonitor {
         mEventListeners.remove(listener);
     }
 
+    /**
+     * Adds a raw delta listener.
+     * @param listener The listener to receive the deltas.
+     */
+    public synchronized void addRawDeltaListener(IRawDeltaListener listener) {
+        mRawDeltaListeners.add(listener);
+    }
+
+    /**
+     * Removes an existing Raw Delta listener.
+     * @param listener the listener to remove.
+     */
+    public synchronized void removeRawDeltaListener(IRawDeltaListener listener) {
+        mRawDeltaListeners.remove(listener);
+    }
+
+    private void notifyResourceEventStart() {
+        for (IResourceEventListener listener : mEventListeners) {
+            try {
+                listener.resourceChangeEventStart();
+            } catch (Throwable t) {
+                AdtPlugin.log(t,"Failed to call IResourceEventListener.resourceChangeEventStart");
+            }
+        }
+    }
+
+    private void notifyResourceEventEnd() {
+        for (IResourceEventListener listener : mEventListeners) {
+            try {
+                listener.resourceChangeEventEnd();
+            } catch (Throwable t) {
+                AdtPlugin.log(t,"Failed to call IResourceEventListener.resourceChangeEventEnd");
+            }
+        }
+    }
+
     private IResourceChangeListener mResourceChangeListener = new IResourceChangeListener() {
         /**
          * Processes the workspace resource change events.
          *
          * @see IResourceChangeListener#resourceChanged(IResourceChangeEvent)
          */
+        @Override
         public synchronized void resourceChanged(IResourceChangeEvent event) {
             // notify the event listeners of a start.
-            for (IResourceEventListener listener : mEventListeners) {
-                try {
-                    listener.resourceChangeEventStart();
-                } catch (Throwable t) {
-                    AdtPlugin.log(t,"Failed to call IResourceEventListener.resourceChangeEventStart");
-                }
-            }
+            notifyResourceEventStart();
 
             if (event.getType() == IResourceChangeEvent.PRE_DELETE) {
                 // a project is being deleted. Lets get the project object and remove
@@ -418,14 +512,25 @@ public final class GlobalProjectMonitor {
                 // notify the listeners.
                 for (IProjectListener pl : mProjectListeners) {
                     try {
-                        pl.projectDeleted(project);
-                    } catch (Throwable t) {
-                        AdtPlugin.log(t,"Failed to call IProjectListener.projectDeleted");
+                        if (project.hasNature(AdtConstants.NATURE_DEFAULT)) {
+                            try {
+                                pl.projectDeleted(project);
+                            } catch (Throwable t) {
+                                AdtPlugin.log(t,"Failed to call IProjectListener.projectDeleted");
+                            }
+                        }
+                    } catch (CoreException e) {
+                        // just ignore this project.
                     }
                 }
             } else {
                 // this a regular resource change. We get the delta and go through it with a visitor.
                 IResourceDelta delta = event.getDelta();
+
+                // notify the raw delta listeners
+                for (IRawDeltaListener listener : mRawDeltaListeners) {
+                    listener.visitDelta(delta);
+                }
 
                 DeltaVisitor visitor = new DeltaVisitor();
                 try {
@@ -435,14 +540,7 @@ public final class GlobalProjectMonitor {
             }
 
             // we're done, notify the event listeners.
-            for (IResourceEventListener listener : mEventListeners) {
-                try {
-                    listener.resourceChangeEventEnd();
-                } catch (Throwable t) {
-                    AdtPlugin.log(t,"Failed to call IResourceEventListener.resourceChangeEventEnd");
-                }
-            }
+            notifyResourceEventEnd();
         }
     };
-
 }

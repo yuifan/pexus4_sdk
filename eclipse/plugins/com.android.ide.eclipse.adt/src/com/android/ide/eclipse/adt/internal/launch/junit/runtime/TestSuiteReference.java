@@ -18,8 +18,8 @@ package com.android.ide.eclipse.adt.internal.launch.junit.runtime;
 
 import org.eclipse.jdt.internal.junit.runner.IVisitsTestTrees;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Reference for an Android test suite aka class.
@@ -28,21 +28,22 @@ import java.util.ArrayList;
 class TestSuiteReference extends AndroidTestReference {
 
     private final String mClassName;
-    private List<TestCaseReference> mTests;
+    private List<AndroidTestReference> mTests;
 
     /**
      * Creates a TestSuiteReference
-     * 
+     *
      * @param className the fully qualified name of the test class
      */
     TestSuiteReference(String className) {
-         mClassName = className; 
-         mTests = new ArrayList<TestCaseReference>();
+         mClassName = className;
+         mTests = new ArrayList<AndroidTestReference>();
     }
 
     /**
-     * Returns a count of the number of test cases included in this suite. 
+     * Returns a count of the number of test cases included in this suite.
      */
+    @Override
     public int countTestCases() {
         return mTests.size();
     }
@@ -50,12 +51,13 @@ class TestSuiteReference extends AndroidTestReference {
     /**
      * Sends test identifier and test count information for this test class, and all its included
      * test methods.
-     * 
+     *
      * @param notified the {@link IVisitsTestTrees} to send test info too
      */
+    @Override
     public void sendTree(IVisitsTestTrees notified) {
         notified.visitTreeEntry(getIdentifier(), true, countTestCases());
-        for (TestCaseReference ref : mTests) {
+        for (AndroidTestReference ref: mTests) {
             ref.sendTree(notified);
         }
     }
@@ -63,16 +65,28 @@ class TestSuiteReference extends AndroidTestReference {
     /**
      * Return the name of this test class.
      */
+    @Override
     public String getName() {
         return mClassName;
     }
 
     /**
      * Adds a test method to this suite.
-     * 
+     *
      * @param testRef the {@link TestCaseReference} to add
      */
-    void addTest(TestCaseReference testRef) {
+    void addTest(AndroidTestReference testRef) {
         mTests.add(testRef);
+    }
+
+    /** Returns the test suite of given name, null if no such test suite exists */
+    public TestSuiteReference getTestSuite(String name) {
+        for (AndroidTestReference ref: mTests) {
+            if (ref instanceof TestSuiteReference && ref.getName().equals(name)) {
+                return (TestSuiteReference) ref;
+            }
+        }
+
+        return null;
     }
 }

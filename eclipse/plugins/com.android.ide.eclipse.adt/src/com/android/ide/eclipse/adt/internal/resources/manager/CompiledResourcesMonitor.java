@@ -16,14 +16,19 @@
 
 package com.android.ide.eclipse.adt.internal.resources.manager;
 
+import com.android.SdkConstants;
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.ide.common.resources.IntArrayWrapper;
+import com.android.ide.common.xml.ManifestData;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
 import com.android.ide.eclipse.adt.internal.project.AndroidManifestHelper;
 import com.android.ide.eclipse.adt.internal.project.ProjectHelper;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
 import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor.IFileListener;
 import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor.IProjectListener;
-import com.android.sdklib.xml.ManifestData;
+import com.android.resources.ResourceType;
+import com.android.util.Pair;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarkerDelta;
@@ -34,10 +39,13 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IStatus;
 
+import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * A monitor for the compiled resources. This only monitors changes in the resources of type
@@ -74,15 +82,69 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
      *
      * @see IFileListener#fileChanged
      */
-    public void fileChanged(IFile file, IMarkerDelta[] markerDeltas, int kind) {
-        if (file.getName().equals(AndroidConstants.FN_COMPILED_RESOURCE_CLASS)) {
-            loadAndParseRClass(file.getProject());
+    @Override
+    public void fileChanged(@NonNull IFile file, @NonNull IMarkerDelta[] markerDeltas,
+            int kind, @Nullable String extension, int flags, boolean isAndroidProject) {
+        if (!isAndroidProject || flags == IResourceDelta.MARKERS) {
+            // Not Android or only the markers changed: not relevant
+            return;
         }
+
+        IProject project = file.getProject();
+
+        if (file.getName().equals(SdkConstants.FN_COMPILED_RESOURCE_CLASS)) {
+            // create the classname
+            String className = getRClassName(project);
+            if (className == null) {
+                // We need to abort.
+                AdtPlugin.log(IStatus.ERROR,
+                        "fileChanged: failed to find manifest package for project %1$s", //$NON-NLS-1$
+                        project.getName());
+                return;
+            }
+            // path will begin with /projectName/bin/classes so we'll ignore that
+            IPath relativeClassPath = file.getFullPath().removeFirstSegments(3);
+            if (packagePathMatches(relativeClassPath.toString(), className)) {
+                loadAndParseRClass(project, className);
+            }
+        }
+    }
+
+    /**
+     * Check to see if the package section of the given path matches the packageName.
+     * For example, /project/bin/classes/com/foo/app/R.class should match com.foo.app.R
+     * @param path the pathname of the file to look at
+     * @param packageName the package qualified name of the class
+     * @return true if the package section of the path matches the package qualified name
+     */
+    private boolean packagePathMatches(String path, String packageName) {
+        // First strip the ".class" off the end of the path
+        String pathWithoutExtension = path.substring(0, path.indexOf(SdkConstants.DOT_CLASS));
+
+        // then split the components of each path by their separators
+        String [] pathArray = pathWithoutExtension.split(Pattern.quote(File.separator));
+        String [] packageArray = packageName.split(AdtConstants.RE_DOT);
+
+
+        int pathIndex = 0;
+        int packageIndex = 0;
+
+        while (pathIndex < pathArray.length && packageIndex < packageArray.length) {
+            if (pathArray[pathIndex].equals(packageArray[packageIndex]) == false) {
+                return false;
+            }
+            pathIndex++;
+            packageIndex++;
+        }
+        // We may have matched all the way up to this point, but we're not sure it's a match
+        // unless BOTH paths done
+        return (pathIndex == pathArray.length && packageIndex == packageArray.length);
     }
 
     /**
      * Processes project close event.
      */
+    @Override
     public void projectClosed(IProject project) {
         // the ProjectResources object will be removed by the ResourceManager.
     }
@@ -90,6 +152,7 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
     /**
      * Processes project delete event.
      */
+    @Override
     public void projectDeleted(IProject project) {
         // the ProjectResources object will be removed by the ResourceManager.
     }
@@ -97,11 +160,13 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
     /**
      * Processes project open event.
      */
+    @Override
     public void projectOpened(IProject project) {
         // when the project is opened, we get an ADDED event for each file, so we don't
         // need to do anything here.
     }
 
+    @Override
     public void projectRenamed(IProject project, IPath from) {
         // renamed projects also trigger delete/open event,
         // so nothing to be done here.
@@ -110,35 +175,41 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
     /**
      * Processes existing project at init time.
      */
+    @Override
     public void projectOpenedWithWorkspace(IProject project) {
         try {
             // check this is an android project
-            if (project.hasNature(AndroidConstants.NATURE_DEFAULT)) {
-                loadAndParseRClass(project);
+            if (project.hasNature(AdtConstants.NATURE_DEFAULT)) {
+                String className = getRClassName(project);
+                // Find the classname
+                if (className == null) {
+                    // We need to abort.
+                    AdtPlugin.log(IStatus.ERROR,
+                            "projectOpenedWithWorkspace: failed to find manifest package for project %1$s", //$NON-NLS-1$
+                            project.getName());
+                    return;
+                }
+                loadAndParseRClass(project, className);
             }
         } catch (CoreException e) {
             // pass
         }
     }
 
-    private void loadAndParseRClass(IProject project) {
+    @Override
+    public void allProjectsOpenedWithWorkspace() {
+        // nothing to do.
+    }
+
+
+    private void loadAndParseRClass(IProject project, String className) {
         try {
             // first check there's a ProjectResources to store the content
             ProjectResources projectResources = ResourceManager.getInstance().getProjectResources(
                     project);
 
             if (projectResources != null) {
-                // create the classname
-                String className = getRClassName(project);
-                if (className == null) {
-                    // We need to abort.
-                    AdtPlugin.log(IStatus.ERROR,
-                            "loadAndParseRClass: failed to find manifest package for project %1$s", //$NON-NLS-1$
-                            project.getName());
-                    return;
-                }
-
-                // create a temporary class loader to load it.
+                // create a temporary class loader to load the class
                 ProjectClassLoader loader = new ProjectClassLoader(null /* parentClassLoader */,
                         project);
 
@@ -147,10 +218,10 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
 
                     if (clazz != null) {
                         // create the maps to store the result of the parsing
-                        Map<String, Map<String, Integer>> resourceValueMap =
-                            new HashMap<String, Map<String, Integer>>();
-                        Map<Integer, String[]> genericValueToNameMap =
-                            new HashMap<Integer, String[]>();
+                        Map<ResourceType, Map<String, Integer>> resourceValueMap =
+                            new EnumMap<ResourceType, Map<String, Integer>>(ResourceType.class);
+                        Map<Integer, Pair<ResourceType, String>> genericValueToNameMap =
+                            new HashMap<Integer, Pair<ResourceType, String>>();
                         Map<IntArrayWrapper, String> styleableValueToNameMap =
                             new HashMap<IntArrayWrapper, String>();
 
@@ -180,31 +251,36 @@ public final class CompiledResourcesMonitor implements IFileListener, IProjectLi
      * @param resourceValueMap
      * @return True if we managed to parse the R class.
      */
-    private boolean parseClass(Class<?> rClass, Map<Integer, String[]> genericValueToNameMap,
-            Map<IntArrayWrapper, String> styleableValueToNameMap, Map<String,
+    private boolean parseClass(Class<?> rClass,
+            Map<Integer, Pair<ResourceType, String>> genericValueToNameMap,
+            Map<IntArrayWrapper, String> styleableValueToNameMap, Map<ResourceType,
             Map<String, Integer>> resourceValueMap) {
         try {
             for (Class<?> inner : rClass.getDeclaredClasses()) {
-                String resType = inner.getSimpleName();
+                String resTypeName = inner.getSimpleName();
+                ResourceType resType = ResourceType.getEnum(resTypeName);
 
-                Map<String, Integer> fullMap = new HashMap<String, Integer>();
-                resourceValueMap.put(resType, fullMap);
+                if (resType != null) {
+                    Map<String, Integer> fullMap = new HashMap<String, Integer>();
+                    resourceValueMap.put(resType, fullMap);
 
-                for (Field f : inner.getDeclaredFields()) {
-                    // only process static final fields.
-                    int modifiers = f.getModifiers();
-                    if (Modifier.isStatic(modifiers) && Modifier.isFinal(modifiers)) {
-                        Class<?> type = f.getType();
-                        if (type.isArray() && type.getComponentType() == int.class) {
-                            // if the object is an int[] we put it in the styleable map
-                            styleableValueToNameMap.put(new IntArrayWrapper((int[]) f.get(null)),
-                                    f.getName());
-                        } else if (type == int.class) {
-                            Integer value = (Integer) f.get(null);
-                            genericValueToNameMap.put(value, new String[] { f.getName(), resType });
-                            fullMap.put(f.getName(), value);
-                        } else {
-                            assert false;
+                    for (Field f : inner.getDeclaredFields()) {
+                        // only process static final fields.
+                        int modifiers = f.getModifiers();
+                        if (Modifier.isStatic(modifiers)) {
+                            Class<?> type = f.getType();
+                            if (type.isArray() && type.getComponentType() == int.class) {
+                                // if the object is an int[] we put it in the styleable map
+                                styleableValueToNameMap.put(
+                                        new IntArrayWrapper((int[]) f.get(null)),
+                                        f.getName());
+                            } else if (type == int.class) {
+                                Integer value = (Integer) f.get(null);
+                                genericValueToNameMap.put(value, Pair.of(resType, f.getName()));
+                                fullMap.put(f.getName(), value);
+                            } else {
+                                assert false;
+                            }
                         }
                     }
                 }

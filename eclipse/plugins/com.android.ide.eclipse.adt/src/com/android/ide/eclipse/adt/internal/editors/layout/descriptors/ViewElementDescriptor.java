@@ -16,10 +16,24 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout.descriptors;
 
+import static com.android.SdkConstants.ANDROID_VIEW_PKG;
+import static com.android.SdkConstants.ANDROID_WEBKIT_PKG;
+import static com.android.SdkConstants.ANDROID_WIDGET_PREFIX;
+import static com.android.SdkConstants.VIEW;
+import static com.android.SdkConstants.VIEW_TAG;
+
+import com.android.ide.common.resources.platform.AttributeInfo;
+import com.android.ide.eclipse.adt.AdtPlugin;
+import com.android.ide.eclipse.adt.internal.editors.IconFactory;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.layout.uimodel.UiViewElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
+
+import org.eclipse.swt.graphics.Image;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * {@link ViewElementDescriptor} describes the properties expected for a given XML element node
@@ -43,16 +57,19 @@ import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
  *
  * @see ElementDescriptor
  */
-public final class ViewElementDescriptor extends ElementDescriptor {
+public class ViewElementDescriptor extends ElementDescriptor {
 
     /** The full class name (FQCN) of this view. */
-    private String mFullClassName;
+    private final String mFullClassName;
 
     /** The list of layout attributes. Can be empty but not null. */
     private AttributeDescriptor[] mLayoutAttributes;
 
     /** The super-class descriptor. Can be null. */
     private ViewElementDescriptor mSuperClassDesc;
+
+    /** List of attribute sources, classes that contribute attributes to {@link #mAttributes} */
+    private List<String> mAttributeSources;
 
     /**
      * Constructs a new {@link ViewElementDescriptor} based on its XML name, UI name,
@@ -84,48 +101,6 @@ public final class ViewElementDescriptor extends ElementDescriptor {
     }
 
     /**
-     * Constructs a new {@link ElementDescriptor} based on its XML name, the canonical
-     * name of the class it represents, and its children list.
-     * The UI name is build by capitalizing the XML name.
-     * The UI nodes will be non-mandatory.
-     *
-     * @param xml_name The XML element node name. Case sensitive.
-     * @param fullClassName The fully qualified class name the {@link ViewElementDescriptor} is
-     *          representing.
-     * @param children The list of allowed children. Can be null or empty.
-     * @param mandatory Whether this node must always exist (even for empty models). A mandatory
-     *  UI node is never deleted and it may lack an actual XML node attached. A non-mandatory
-     *  UI node MUST have an XML node attached and it will cease to exist when the XML node
-     *  ceases to exist.
-     *
-     *  @deprecated Never used. We should clean it up someday.
-     */
-    public ViewElementDescriptor(String xml_name, String fullClassName,
-            ElementDescriptor[] children,
-            boolean mandatory) {
-        super(xml_name, children, mandatory);
-        mFullClassName = fullClassName;
-    }
-
-    /**
-     * Constructs a new {@link ElementDescriptor} based on its XML name and children list.
-     * The UI name is build by capitalizing the XML name.
-     * The UI nodes will be non-mandatory.
-     *
-     * @param xml_name The XML element node name. Case sensitive.
-     * @param fullClassName The fully qualified class name the {@link ViewElementDescriptor} is
-     * representing.
-     * @param children The list of allowed children. Can be null or empty.
-     *
-     *  @deprecated Never used. We should clean it up someday.
-     */
-    public ViewElementDescriptor(String xml_name, String fullClassName,
-            ElementDescriptor[] children) {
-        super(xml_name, children);
-        mFullClassName = fullClassName;
-    }
-
-    /**
      * Constructs a new {@link ElementDescriptor} based on its XML name and on the canonical
      * name of the class it represents.
      * The UI name is build by capitalizing the XML name.
@@ -138,19 +113,35 @@ public final class ViewElementDescriptor extends ElementDescriptor {
     public ViewElementDescriptor(String xml_name, String fullClassName) {
         super(xml_name);
         mFullClassName = fullClassName;
+        mLayoutAttributes = null;
     }
 
     /**
      * Returns the fully qualified name of the View class represented by this element descriptor
      * e.g. "android.view.View".
+     *
+     * @return the fully qualified class name, never null
      */
     public String getFullClassName() {
         return mFullClassName;
     }
 
-    /** Returns the list of layout attributes. Can be empty but not null. */
+    /** Returns the list of layout attributes. Can be empty but not null.
+     *
+     * @return the list of layout attributes, never null
+     */
     public AttributeDescriptor[] getLayoutAttributes() {
         return mLayoutAttributes;
+    }
+
+    /**
+     * Sets the list of layout attribute attributes.
+     *
+     * @param attributes the new layout attributes, not null
+     */
+    public void setLayoutAttributes(AttributeDescriptor[] attributes) {
+        assert attributes != null;
+        mLayoutAttributes = attributes;
     }
 
     /**
@@ -164,6 +155,8 @@ public final class ViewElementDescriptor extends ElementDescriptor {
     /**
      * Returns the {@link ViewElementDescriptor} of the super-class of this View descriptor
      * that matches the java View hierarchy. Can be null.
+     *
+     * @return the super class' descriptor or null
      */
     public ViewElementDescriptor getSuperClassDesc() {
         return mSuperClassDesc;
@@ -172,8 +165,85 @@ public final class ViewElementDescriptor extends ElementDescriptor {
     /**
      * Sets the {@link ViewElementDescriptor} of the super-class of this View descriptor
      * that matches the java View hierarchy. Can be null.
+     *
+     * @param superClassDesc the descriptor for the super class, or null
      */
     public void setSuperClass(ViewElementDescriptor superClassDesc) {
         mSuperClassDesc = superClassDesc;
+    }
+
+    /**
+     * Returns an optional icon for the element.
+     * <p/>
+     * By default this tries to return an icon based on the XML name of the element.
+     * If this fails, it tries to return the default element icon as defined in the
+     * plugin. If all fails, it returns null.
+     *
+     * @return An icon for this element or null.
+     */
+    @Override
+    public Image getGenericIcon() {
+        IconFactory factory = IconFactory.getInstance();
+        String name = mXmlName;
+        if (name.indexOf('.') != -1) {
+            // If the user uses a fully qualified name, such as
+            // "android.gesture.GestureOverlayView" in their XML, we need to look up
+            // only by basename
+            name = name.substring(name.lastIndexOf('.') + 1);
+        } else if (VIEW_TAG.equals(name)) {
+            // Can't have both view.png and View.png; issues on case sensitive vs
+            // case insensitive file systems
+            name = VIEW;
+        }
+
+        Image icon = factory.getIcon(name);
+        if (icon == null) {
+            icon = AdtPlugin.getAndroidLogo();
+        }
+
+        return icon;
+    }
+
+    /**
+     * Returns the list of attribute sources for the attributes provided by this
+     * descriptor. An attribute source is the fully qualified class name of the
+     * defining class for some of the properties. The specific attribute source
+     * of a given {@link AttributeInfo} can be found by calling
+     * {@link AttributeInfo#getDefinedBy()}.
+     * <p>
+     * The attribute sources are ordered from class to super class.
+     * <p>
+     * The list may <b>not</b> be modified by clients.
+     *
+     * @return a non null list of attribute sources for this view
+     */
+    public List<String> getAttributeSources() {
+        return mAttributeSources != null ? mAttributeSources : Collections.<String>emptyList();
+    }
+
+    /**
+     * Sets the attribute sources for this view. See {@link #getAttributes()}
+     * for details.
+     *
+     * @param attributeSources a non null list of attribute sources for this
+     *            view descriptor
+     * @see #getAttributeSources()
+     */
+    public void setAttributeSources(List<String> attributeSources) {
+        mAttributeSources = attributeSources;
+    }
+
+    /**
+     * Returns true if views with the given fully qualified class name need to include
+     * their package in the layout XML tag
+     *
+     * @param fqcn the fully qualified class name, such as android.widget.Button
+     * @return true if the full package path should be included in the layout XML element
+     *         tag
+     */
+    public static boolean viewNeedsPackage(String fqcn) {
+        return !(fqcn.startsWith(ANDROID_WIDGET_PREFIX)
+              || fqcn.startsWith(ANDROID_VIEW_PKG)
+              || fqcn.startsWith(ANDROID_WEBKIT_PKG));
     }
 }

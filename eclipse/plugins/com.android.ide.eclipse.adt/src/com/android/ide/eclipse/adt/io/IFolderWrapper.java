@@ -16,15 +16,16 @@
 
 package com.android.ide.eclipse.adt.io;
 
-import com.android.sdklib.io.IAbstractFile;
-import com.android.sdklib.io.IAbstractFolder;
-import com.android.sdklib.io.IAbstractResource;
+import com.android.io.IAbstractFile;
+import com.android.io.IAbstractFolder;
+import com.android.io.IAbstractResource;
 
 import org.eclipse.core.resources.IContainer;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 
 import java.util.ArrayList;
@@ -47,14 +48,28 @@ public class IFolderWrapper implements IAbstractFolder {
         mContainer = container;
     }
 
+    @Override
     public String getName() {
         return mContainer.getName();
     }
 
+    @Override
     public boolean exists() {
         return mContainer.exists();
     }
 
+    @Override
+    public boolean delete() {
+        try {
+            mContainer.delete(true /*force*/, new NullProgressMonitor());
+            return true;
+        } catch (CoreException e) {
+            return false;
+        }
+    }
+
+
+    @Override
     public IAbstractResource[] listMembers() {
         try {
             IResource[] members = mContainer.members();
@@ -78,6 +93,7 @@ public class IFolderWrapper implements IAbstractFolder {
         return new IAbstractResource[0];
     }
 
+    @Override
     public boolean hasFile(String name) {
         try {
             IResource[] files = mContainer.members();
@@ -93,6 +109,7 @@ public class IFolderWrapper implements IAbstractFolder {
         return false;
     }
 
+    @Override
     public IAbstractFile getFile(String name) {
         if (mFolder != null) {
             IFile file = mFolder.getFile(name);
@@ -129,6 +146,7 @@ public class IFolderWrapper implements IAbstractFolder {
         return mContainer.hashCode();
     }
 
+    @Override
     public IAbstractFolder getFolder(String name) {
         if (mFolder != null) {
             IFolder folder = mFolder.getFolder(name);
@@ -139,10 +157,12 @@ public class IFolderWrapper implements IAbstractFolder {
         return new IFolderWrapper(folder);
     }
 
+    @Override
     public String getOsLocation() {
         return mContainer.getLocation().toOSString();
     }
 
+    @Override
     public String[] list(FilenameFilter filter) {
         try {
             IResource[] members = mContainer.members();
@@ -163,6 +183,7 @@ public class IFolderWrapper implements IAbstractFolder {
         return new String[0];
     }
 
+    @Override
     public IAbstractFolder getParentFolder() {
         IContainer p = mContainer.getParent();
         if (p != null) {
@@ -170,5 +191,10 @@ public class IFolderWrapper implements IAbstractFolder {
         }
 
         return null;
+    }
+
+    @Override
+    public String toString() {
+        return mFolder.toString();
     }
 }

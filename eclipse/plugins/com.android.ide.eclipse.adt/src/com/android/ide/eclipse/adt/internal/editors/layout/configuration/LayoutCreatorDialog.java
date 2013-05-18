@@ -16,12 +16,13 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout.configuration;
 
+import com.android.ide.common.resources.configuration.FolderConfiguration;
+import com.android.ide.common.resources.configuration.ResourceQualifier;
 import com.android.ide.eclipse.adt.internal.editors.IconFactory;
-import com.android.ide.eclipse.adt.internal.resources.configurations.FolderConfiguration;
-import com.android.ide.eclipse.adt.internal.resources.configurations.ResourceQualifier;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFolderType;
 import com.android.ide.eclipse.adt.internal.ui.ConfigurationSelector;
 import com.android.ide.eclipse.adt.internal.ui.ConfigurationSelector.ConfigurationState;
+import com.android.ide.eclipse.adt.internal.ui.ConfigurationSelector.SelectorMode;
+import com.android.resources.ResourceFolderType;
 import com.android.sdkuilib.ui.GridDialog;
 
 import org.eclipse.jface.dialogs.Dialog;
@@ -49,6 +50,7 @@ public final class LayoutCreatorDialog extends GridDialog {
     /**
      * Creates a dialog, and init the UI from a {@link FolderConfiguration}.
      * @param parentShell the parent {@link Shell}.
+     * @param fileName the filename associated with the configuration
      * @param config The starting configuration.
      */
     public LayoutCreatorDialog(Shell parentShell, String fileName, FolderConfiguration config) {
@@ -65,8 +67,12 @@ public final class LayoutCreatorDialog extends GridDialog {
         new Label(parent, SWT.NONE).setText(
                 String.format("Configuration for the alternate version of %1$s", mFileName));
 
-        mSelector = new ConfigurationSelector(parent, false /*deviceMode*/);
+        mSelector = new ConfigurationSelector(parent, SelectorMode.CONFIG_ONLY);
         mSelector.setConfiguration(mConfig);
+
+        // because the ConfigSelector is running in CONFIG_ONLY mode, the current config
+        // displayed by it is not mConfig anymore, so get the current config.
+        mSelector.getConfiguration(mConfig);
 
         // parent's layout is a GridLayout as specified in the javadoc.
         GridData gd = new GridData();
@@ -77,6 +83,7 @@ public final class LayoutCreatorDialog extends GridDialog {
         // add a listener to check on the validity of the FolderConfiguration as
         // they are built.
         mSelector.setOnChangeListener(new Runnable() {
+            @Override
             public void run() {
                 ConfigurationState state = mSelector.getState();
 
@@ -121,6 +128,11 @@ public final class LayoutCreatorDialog extends GridDialog {
         resetStatus();
     }
 
+    /**
+     * Sets the edited configuration on the given configuration parameter
+     *
+     * @param config the configuration to apply the current edits to
+     */
     public void getConfiguration(FolderConfiguration config) {
         config.set(mConfig);
     }

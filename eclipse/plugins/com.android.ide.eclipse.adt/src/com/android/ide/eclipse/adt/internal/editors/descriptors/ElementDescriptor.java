@@ -16,10 +16,12 @@
 
 package com.android.ide.eclipse.adt.internal.editors.descriptors;
 
+import static com.android.SdkConstants.ANDROID_NS_NAME_PREFIX;
+import static com.android.SdkConstants.ANDROID_URI;
+
 import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.editors.IconFactory;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
-import com.android.sdklib.SdkConstants;
 
 import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.swt.graphics.Image;
@@ -38,11 +40,13 @@ import java.util.Set;
  * an actual XML node attached. A non-mandatory UI node MUST have an XML node attached
  * and it will cease to exist when the XML node ceases to exist.
  */
-public class ElementDescriptor {
+public class ElementDescriptor implements Comparable<ElementDescriptor> {
+    private static final String ELEMENT_ICON_FILENAME = "element"; //$NON-NLS-1$
+
     /** The XML element node name. Case sensitive. */
-    private String mXmlName;
+    protected final String mXmlName;
     /** The XML element name for the user interface, typically capitalized. */
-    private String mUiName;
+    private final String mUiName;
     /** The list of allowed attributes. */
     private AttributeDescriptor[] mAttributes;
     /** The list of allowed children */
@@ -52,7 +56,41 @@ public class ElementDescriptor {
     /** An optional SKD URL. Can be empty. */
     private String mSdkUrl;
     /** Whether this UI node must always exist (even for empty models). */
-    private boolean mMandatory;
+    private final Mandatory mMandatory;
+
+    public enum Mandatory {
+        NOT_MANDATORY,
+        MANDATORY,
+        MANDATORY_LAST
+    }
+
+    /**
+     * Constructs a new {@link ElementDescriptor} based on its XML name, UI name,
+     * tooltip, SDK url, attributes list, children list and mandatory.
+     *
+     * @param xml_name The XML element node name. Case sensitive.
+     * @param ui_name The XML element name for the user interface, typically capitalized.
+     * @param tooltip An optional tooltip. Can be null or empty.
+     * @param sdk_url An optional SKD URL. Can be null or empty.
+     * @param attributes The list of allowed attributes. Can be null or empty.
+     * @param children The list of allowed children. Can be null or empty.
+     * @param mandatory Whether this node must always exist (even for empty models). A mandatory
+     *  UI node is never deleted and it may lack an actual XML node attached. A non-mandatory
+     *  UI node MUST have an XML node attached and it will cease to exist when the XML node
+     *  ceases to exist.
+     */
+    public ElementDescriptor(String xml_name, String ui_name, String tooltip, String sdk_url,
+            AttributeDescriptor[] attributes,
+            ElementDescriptor[] children,
+            Mandatory mandatory) {
+        mMandatory = mandatory;
+        mXmlName = xml_name;
+        mUiName = ui_name;
+        mTooltip = (tooltip != null && tooltip.length() > 0) ? tooltip : null;
+        mSdkUrl = (sdk_url != null && sdk_url.length() > 0) ? sdk_url : null;
+        setAttributes(attributes != null ? attributes : new AttributeDescriptor[]{});
+        mChildren = children != null ? children : new ElementDescriptor[]{};
+    }
 
     /**
      * Constructs a new {@link ElementDescriptor} based on its XML name, UI name,
@@ -73,7 +111,7 @@ public class ElementDescriptor {
             AttributeDescriptor[] attributes,
             ElementDescriptor[] children,
             boolean mandatory) {
-        mMandatory = mandatory;
+        mMandatory = mandatory ? Mandatory.MANDATORY : Mandatory.NOT_MANDATORY;
         mXmlName = xml_name;
         mUiName = ui_name;
         mTooltip = (tooltip != null && tooltip.length() > 0) ? tooltip : null;
@@ -94,7 +132,7 @@ public class ElementDescriptor {
      *  UI node MUST have an XML node attached and it will cease to exist when the XML node
      *  ceases to exist.
      */
-    public ElementDescriptor(String xml_name, ElementDescriptor[] children, boolean mandatory) {
+    public ElementDescriptor(String xml_name, ElementDescriptor[] children, Mandatory mandatory) {
         this(xml_name, prettyName(xml_name), null, null, null, children, mandatory);
     }
 
@@ -122,8 +160,19 @@ public class ElementDescriptor {
     }
 
     /** Returns whether this node must always exist (even for empty models) */
-    public boolean isMandatory() {
+    public Mandatory getMandatory() {
         return mMandatory;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("%s [%s, attr %d, children %d%s]",    //$NON-NLS-1$
+                this.getClass().getSimpleName(),
+                mXmlName,
+                mAttributes != null ? mAttributes.length : 0,
+                mChildren != null ? mChildren.length : 0,
+                mMandatory != Mandatory.NOT_MANDATORY ? ", " + mMandatory.toString() : "" //$NON-NLS-1$ //$NON-NLS-2$
+                );
     }
 
     /**
@@ -163,8 +212,8 @@ public class ElementDescriptor {
      */
     public final String getNamespace() {
         // For now we hard-code the prefix as being "android"
-        if (mXmlName.startsWith("android:")) { //$NON-NLs-1$
-            return SdkConstants.NS_RESOURCES;
+        if (mXmlName.startsWith(ANDROID_NS_NAME_PREFIX)) {
+            return ANDROID_URI;
         }
 
         return ""; //$NON-NLs-1$
@@ -177,20 +226,52 @@ public class ElementDescriptor {
     }
 
     /**
-     * Returns an optional icon for the element.
+     * Returns an icon for the element.
+     * This icon is generic, that is all element descriptors have the same icon
+     * no matter what they represent.
+     *
+     * @return An icon for this element or null.
+     * @see #getCustomizedIcon()
+     */
+    public Image getGenericIcon() {
+        return IconFactory.getInstance().getIcon(ELEMENT_ICON_FILENAME);
+    }
+
+    /**
+     * Returns an optional icon for the element, typically to be used in XML form trees.
+     * <p/>
+     * This icon is customized to the given descriptor, that is different elements
+     * will have different icons.
      * <p/>
      * By default this tries to return an icon based on the XML name of the element.
      * If this fails, it tries to return the default Android logo as defined in the
      * plugin. If all fails, it returns null.
      *
-     * @return An icon for this element or null.
+     * @return An icon for this element. This is never null.
      */
-    public Image getIcon() {
+    public Image getCustomizedIcon() {
         IconFactory factory = IconFactory.getInstance();
-        int color = hasChildren() ? IconFactory.COLOR_BLUE : IconFactory.COLOR_GREEN;
-        int shape = hasChildren() ? IconFactory.SHAPE_RECT : IconFactory.SHAPE_CIRCLE;
-        Image icon = factory.getIcon(mXmlName, color, shape);
-        return icon != null ? icon : AdtPlugin.getAndroidLogo();
+        int color = hasChildren() ? IconFactory.COLOR_BLUE
+                : IconFactory.COLOR_GREEN;
+        int shape = hasChildren() ? IconFactory.SHAPE_RECT
+                : IconFactory.SHAPE_CIRCLE;
+        String name = mXmlName;
+
+        int pos = name.lastIndexOf('.');
+        if (pos != -1) {
+            // If the user uses a fully qualified name, such as
+            // "android.gesture.GestureOverlayView" in their XML, we need to
+            // look up only by basename
+            name = name.substring(pos + 1);
+        }
+        Image icon = factory.getIcon(name, color, shape);
+        if (icon == null) {
+            icon = getGenericIcon();
+        }
+        if (icon == null) {
+            icon = AdtPlugin.getAndroidLogo();
+        }
+        return icon;
     }
 
     /**
@@ -215,7 +296,7 @@ public class ElementDescriptor {
         return mAttributes;
     }
 
-    /* Sets the list of allowed attributes. */
+    /** Sets the list of allowed attributes. */
     public void setAttributes(AttributeDescriptor[] attributes) {
         mAttributes = attributes;
         for (AttributeDescriptor attribute : attributes) {
@@ -231,6 +312,26 @@ public class ElementDescriptor {
     /** @return True if this descriptor has children available */
     public boolean hasChildren() {
         return mChildren.length > 0;
+    }
+
+    /**
+     * Checks whether this descriptor can accept the given descriptor type
+     * as a direct child.
+     *
+     * @return True if this descriptor can accept children of the given descriptor type.
+     *   False if not accepted, no children allowed, or target is null.
+     */
+    public boolean acceptChild(ElementDescriptor target) {
+        if (target != null && mChildren.length > 0) {
+            String targetXmlName = target.getXmlName();
+            for (ElementDescriptor child : mChildren) {
+                if (child.getXmlName().equals(targetXmlName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** Sets the list of allowed children. */
@@ -345,4 +446,40 @@ public class ElementDescriptor {
         return new String(c).replace("-", " ");  //$NON-NLS-1$  //$NON-NLS-2$
     }
 
+    /**
+     * Returns true if this node defines the given attribute
+     *
+     * @param namespaceUri the namespace URI of the target attribute
+     * @param attributeName the attribute name
+     * @return true if this element defines an attribute of the given name and namespace
+     */
+    public boolean definesAttribute(String namespaceUri, String attributeName) {
+        for (AttributeDescriptor desc : mAttributes) {
+            if (desc.getXmlLocalName().equals(attributeName) &&
+                    desc.getNamespaceUri().equals(namespaceUri)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Implements Comparable<ElementDescriptor>:
+    @Override
+    public int compareTo(ElementDescriptor o) {
+        return mUiName.compareToIgnoreCase(o.mUiName);
+    }
+
+    /**
+     * Ensures that this view descriptor's attribute list is up to date. This is
+     * always the case for all the builtin descriptors, but for example for a
+     * custom view, it could be changing dynamically so caches may have to be
+     * recomputed. This method will return true if nothing changed, and false if
+     * it recomputed its info.
+     *
+     * @return true if the attributes are already up to date and nothing changed
+     */
+    public boolean syncAttributes() {
+        return true;
+    }
 }

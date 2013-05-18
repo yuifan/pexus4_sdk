@@ -16,20 +16,23 @@
 
 package com.android.ide.eclipse.adt.internal.editors.manifest.descriptors;
 
+import com.android.SdkConstants;
+import com.android.ide.common.api.IAttributeInfo;
+import com.android.ide.common.api.IAttributeInfo.Format;
+import com.android.ide.common.resources.platform.AttributeInfo;
+import com.android.ide.common.resources.platform.AttrsXmlParser;
+import com.android.ide.common.resources.platform.DeclareStyleableInfo;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo.Format;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.AttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.DescriptorsUtils;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
+import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor.Mandatory;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.IDescriptorProvider;
+import com.android.ide.eclipse.adt.internal.editors.descriptors.ITextAttributeCreator;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ListAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ReferenceAttributeDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.TextAttributeDescriptor;
-import com.android.ide.eclipse.adt.internal.resources.AttributeInfo;
-import com.android.ide.eclipse.adt.internal.resources.DeclareStyleableInfo;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
-import com.android.sdklib.SdkConstants;
+import com.android.ide.eclipse.adt.internal.editors.descriptors.XmlnsAttributeDescriptor;
 
 import org.eclipse.core.runtime.IStatus;
 
@@ -38,9 +41,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 
 
 /**
@@ -51,9 +54,11 @@ import java.util.Map.Entry;
  * loaded the first time.
  */
 public final class AndroidManifestDescriptors implements IDescriptorProvider {
-
+    /** Name of the {@code <uses-permission>} */
+    public static final String USES_PERMISSION = "uses-permission";             //$NON-NLS-1$
     private static final String MANIFEST_NODE_NAME = "manifest";                //$NON-NLS-1$
-    private static final String ANDROID_MANIFEST_STYLEABLE = "AndroidManifest"; //$NON-NLS-1$
+    private static final String ANDROID_MANIFEST_STYLEABLE =
+        AttrsXmlParser.ANDROID_MANIFEST_STYLEABLE;
 
     // Public attributes names, attributes descriptors and elements descriptors
 
@@ -84,12 +89,12 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
     private final TextAttributeDescriptor PACKAGE_ATTR_DESC;
 
     public AndroidManifestDescriptors() {
-        APPLICATION_ELEMENT = createElement("application", null, true); //$NON-NLS-1$ + no child & mandatory
+        APPLICATION_ELEMENT = createElement("application", null, Mandatory.MANDATORY_LAST); //$NON-NLS-1$ + no child & mandatory
         INTRUMENTATION_ELEMENT = createElement("instrumentation"); //$NON-NLS-1$
 
         PERMISSION_ELEMENT = createElement("permission"); //$NON-NLS-1$
-        USES_PERMISSION_ELEMENT = createElement("uses-permission"); //$NON-NLS-1$
-        USES_SDK_ELEMENT = createElement("uses-sdk", null, true); //$NON-NLS-1$ + no child & mandatory
+        USES_PERMISSION_ELEMENT = createElement(USES_PERMISSION);
+        USES_SDK_ELEMENT = createElement("uses-sdk", null, Mandatory.MANDATORY); //$NON-NLS-1$ + no child & mandatory
 
         PERMISSION_GROUP_ELEMENT = createElement("permission-group"); //$NON-NLS-1$
         PERMISSION_TREE_ELEMENT = createElement("permission-tree"); //$NON-NLS-1$
@@ -105,21 +110,24 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
                                         PERMISSION_TREE_ELEMENT,
                                         USES_SDK_ELEMENT,
                         },
-                        true /* mandatory */);
+                        Mandatory.MANDATORY);
 
         // The "package" attribute is treated differently as it doesn't have the standard
         // Android XML namespace.
         PACKAGE_ATTR_DESC = new PackageAttributeDescriptor(PACKAGE_ATTR,
-                "Package",
                 null /* nsUri */,
-                "This attribute gives a unique name for the package, using a Java-style naming convention to avoid name collisions.\nFor example, applications published by Google could have names of the form com.google.app.appname",
-                new AttributeInfo(PACKAGE_ATTR, new Format[] { Format.REFERENCE }) );
+                new AttributeInfo(PACKAGE_ATTR, Format.REFERENCE_SET)).setTooltip(
+                    "This attribute gives a unique name for the package, using a Java-style " +
+                    "naming convention to avoid name collisions.\nFor example, applications " +
+                    "published by Google could have names of the form com.google.app.appname");
     }
 
+    @Override
     public ElementDescriptor[] getRootElementDescriptors() {
         return new ElementDescriptor[] { MANIFEST_ELEMENT };
     }
 
+    @Override
     public ElementDescriptor getDescriptor() {
         return getManifestElement();
     }
@@ -177,34 +185,30 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
         // The key for each override is "element1,element2,.../attr-xml-local-name" or
         // "*/attr-xml-local-name" to match the attribute in any element.
 
-        Map<String, Object> overrides = new HashMap<String, Object>();
+        Map<String, ITextAttributeCreator> overrides = new HashMap<String, ITextAttributeCreator>();
 
-        overrides.put("*/icon", new DescriptorsUtils.ITextAttributeCreator() { //$NON-NLS-1$
-            public TextAttributeDescriptor create(String xmlName, String uiName, String nsUri,
-                    String tooltip) {
-                return new ReferenceAttributeDescriptor(
-                        ResourceType.DRAWABLE,
-                        xmlName, uiName, nsUri,
-                        tooltip,
-                        new AttributeInfo(xmlName, new Format[] { Format.REFERENCE }) );
-            }
-        });
+        overrides.put("*/icon",             ReferenceAttributeDescriptor.CREATOR);  //$NON-NLS-1$
 
-        overrides.put("*/theme",         ThemeAttributeDescriptor.class);   //$NON-NLS-1$
-        overrides.put("*/permission",    ListAttributeDescriptor.class);    //$NON-NLS-1$
-        overrides.put("*/targetPackage", ManifestPkgAttrDescriptor.class);  //$NON-NLS-1$
+        overrides.put("*/theme",            ThemeAttributeDescriptor.CREATOR);      //$NON-NLS-1$
+        overrides.put("*/permission",       ListAttributeDescriptor.CREATOR);       //$NON-NLS-1$
+        overrides.put("*/targetPackage",    ManifestPkgAttrDescriptor.CREATOR);     //$NON-NLS-1$
 
-        overrides.put("uses-library/name", ListAttributeDescriptor.class);       //$NON-NLS-1$
+        overrides.put("uses-library/name",  ListAttributeDescriptor.CREATOR);       //$NON-NLS-1$
+        overrides.put("action,category,uses-permission/" + ANDROID_NAME_ATTR,       //$NON-NLS-1$
+                                            ListAttributeDescriptor.CREATOR);
 
-        overrides.put("action,category,uses-permission/" + ANDROID_NAME_ATTR,    //$NON-NLS-1$
-                      ListAttributeDescriptor.class);
-        overrides.put("application/" + ANDROID_NAME_ATTR, ApplicationAttributeDescriptor.class);  //$NON-NLS-1$
-
-        overrideClassName(overrides, "activity", SdkConstants.CLASS_ACTIVITY);           //$NON-NLS-1$
-        overrideClassName(overrides, "receiver", SdkConstants.CLASS_BROADCASTRECEIVER);  //$NON-NLS-1$
-        overrideClassName(overrides, "service", SdkConstants.CLASS_SERVICE);             //$NON-NLS-1$
-        overrideClassName(overrides, "provider", SdkConstants.CLASS_CONTENTPROVIDER);    //$NON-NLS-1$
-        overrideClassName(overrides, "instrumentation", SdkConstants.CLASS_INSTRUMENTATION);    //$NON-NLS-1$
+        overrideClassName(overrides, "application",                                    //$NON-NLS-1$
+                                     SdkConstants.CLASS_APPLICATION,
+                                     false /*mandatory*/);
+        overrideClassName(overrides, "application/backupAgent",                        //$NON-NLS-1$
+                                     "android.app.backup.BackupAgent",                 //$NON-NLS-1$
+                                     false /*mandatory*/);
+        overrideClassName(overrides, "activity", SdkConstants.CLASS_ACTIVITY);         //$NON-NLS-1$
+        overrideClassName(overrides, "receiver", SdkConstants.CLASS_BROADCASTRECEIVER);//$NON-NLS-1$
+        overrideClassName(overrides, "service",  SdkConstants.CLASS_SERVICE);          //$NON-NLS-1$
+        overrideClassName(overrides, "provider", SdkConstants.CLASS_CONTENTPROVIDER);  //$NON-NLS-1$
+        overrideClassName(overrides, "instrumentation",
+                                                 SdkConstants.CLASS_INSTRUMENTATION);  //$NON-NLS-1$
 
         // -- list element nodes already created --
         // These elements are referenced by already opened editors, so we want to update them
@@ -231,66 +235,98 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
                 "AndroidManifest"); //$NON-NLS-1$
         insertAttribute(MANIFEST_ELEMENT, PACKAGE_ATTR_DESC);
 
-        sanityCheck(manifestMap, MANIFEST_ELEMENT);
+        XmlnsAttributeDescriptor xmlns = new XmlnsAttributeDescriptor(
+                SdkConstants.ANDROID_NS_NAME, SdkConstants.ANDROID_URI);
+        insertAttribute(MANIFEST_ELEMENT, xmlns);
+
+        /*
+         *
+         *
+         */
+        assert sanityCheck(manifestMap, MANIFEST_ELEMENT);
     }
 
     /**
-     * Sets up an attribute override for ANDROID_NAME_ATTR using a ClassAttributeDescriptor
+     * Sets up a mandatory attribute override using a ClassAttributeDescriptor
      * with the specified class name.
+     *
+     * @param overrides The current map of overrides.
+     * @param elementName The element name to override, e.g. "application".
+     *  If this name does NOT have a slash (/), the ANDROID_NAME_ATTR attribute will be overriden.
+     *  Otherwise, if it contains a (/) the format is "element/attribute", for example
+     *  "application/name" vs "application/backupAgent".
+     * @param className The fully qualified name of the base class of the attribute.
      */
-    private static void overrideClassName(Map<String, Object> overrides,
-            String elementName, final String className) {
-        overrides.put(elementName + "/" + ANDROID_NAME_ATTR,
-                new DescriptorsUtils.ITextAttributeCreator() {
-            public TextAttributeDescriptor create(String xmlName, String uiName, String nsUri,
-                    String tooltip) {
-                uiName += "*";  //$NON-NLS-1$
+    private static void overrideClassName(
+            Map<String, ITextAttributeCreator> overrides,
+            String elementName,
+            final String className) {
+        overrideClassName(overrides, elementName, className, true);
+    }
 
-                IAttributeInfo attrInfo = new AttributeInfo(xmlName,
-                        new Format[] { Format.STRING } );
+    /**
+     * Sets up an attribute override using a ClassAttributeDescriptor
+     * with the specified class name.
+     *
+     * @param overrides The current map of overrides.
+     * @param elementName The element name to override, e.g. "application".
+     *  If this name does NOT have a slash (/), the ANDROID_NAME_ATTR attribute will be overriden.
+     *  Otherwise, if it contains a (/) the format is "element/attribute", for example
+     *  "application/name" vs "application/backupAgent".
+     * @param className The fully qualified name of the base class of the attribute.
+     * @param mandatory True if this attribute is mandatory, false if optional.
+     */
+    private static void overrideClassName(
+            Map<String, ITextAttributeCreator> overrides,
+            String elementName,
+            final String className,
+            final boolean mandatory) {
+        if (elementName.indexOf('/') == -1) {
+            elementName = elementName + '/' + ANDROID_NAME_ATTR;
+        }
+        overrides.put(elementName,
+                new ITextAttributeCreator() {
+            @Override
+            public TextAttributeDescriptor create(String xmlName, String nsUri,
+                    IAttributeInfo attrInfo) {
+                if (attrInfo == null) {
+                    attrInfo = new AttributeInfo(xmlName, Format.STRING_SET );
+                }
 
                 if (SdkConstants.CLASS_ACTIVITY.equals(className)) {
                     return new ClassAttributeDescriptor(
                             className,
                             PostActivityCreationAction.getAction(),
                             xmlName,
-                            uiName,
                             nsUri,
-                            tooltip,
                             attrInfo,
-                            true /*mandatory */,
+                            mandatory,
                             true /*defaultToProjectOnly*/);
                 } else if (SdkConstants.CLASS_BROADCASTRECEIVER.equals(className)) {
                     return new ClassAttributeDescriptor(
                             className,
                             PostReceiverCreationAction.getAction(),
                             xmlName,
-                            uiName,
                             nsUri,
-                            tooltip,
                             attrInfo,
-                            true /*mandatory */,
+                            mandatory,
                             true /*defaultToProjectOnly*/);
                 } else if (SdkConstants.CLASS_INSTRUMENTATION.equals(className)) {
                     return new ClassAttributeDescriptor(
                             className,
                             null, // no post action
                             xmlName,
-                            uiName,
                             nsUri,
-                            tooltip,
                             attrInfo,
-                            true /*mandatory */,
+                            mandatory,
                             false /*defaultToProjectOnly*/);
                 } else {
                     return new ClassAttributeDescriptor(
                             className,
                             xmlName,
-                            uiName,
                             nsUri,
-                            tooltip,
                             attrInfo,
-                            true /*mandatory */);
+                            mandatory);
                 }
             }
         });
@@ -305,7 +341,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
     private ElementDescriptor createElement(
             String xmlName,
             ElementDescriptor[] childrenElements,
-            boolean mandatory) {
+            Mandatory mandatory) {
         // Creates an element with no attribute overrides.
         String styleName = guessStyleName(xmlName);
         String sdkUrl = DescriptorsUtils.MANIFEST_SDK_URL + styleName;
@@ -324,7 +360,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
      */
     private ElementDescriptor createElement(String xmlName) {
         // Creates an element with no child and not mandatory
-        return createElement(xmlName, null, false);
+        return createElement(xmlName, null, Mandatory.NOT_MANDATORY);
     }
 
     /**
@@ -350,7 +386,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
      * "Inflates" the properties of an {@link ElementDescriptor} from the styleable declaration.
      * <p/>
      * This first creates all the attributes for the given ElementDescriptor.
-     * It then finds all children of the descriptor, inflate them recursively and set them
+     * It then finds all children of the descriptor, inflates them recursively and sets them
      * as child to this ElementDescriptor.
      *
      * @param styleMap The input styleable map for manifest elements & attributes.
@@ -367,7 +403,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
      */
     private void inflateElement(
             Map<String, DeclareStyleableInfo> styleMap,
-            Map<String, Object> overrides,
+            Map<String, ITextAttributeCreator> overrides,
             Set<String> requiredAttributes,
             HashMap<String, ElementDescriptor> existingElementDescs,
             ElementDescriptor elemDesc,
@@ -376,8 +412,12 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
         assert styleName != null;
         assert styleMap != null;
 
+        if (styleMap == null) {
+            return;
+        }
+
         // define attributes
-        DeclareStyleableInfo style = styleMap != null ? styleMap.get(styleName) : null;
+        DeclareStyleableInfo style = styleMap.get(styleName);
         if (style != null) {
             ArrayList<AttributeDescriptor> attrDescs = new ArrayList<AttributeDescriptor>();
             DescriptorsUtils.appendAttributes(attrDescs,
@@ -432,7 +472,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
      * <p/>
      * Capitalizes the first letter and replace non-alphabet by a space followed by a capital.
      */
-    private String getUiName(String xmlName) {
+    private static String getUiName(String xmlName) {
         StringBuilder sb = new StringBuilder();
 
         boolean capitalize = true;
@@ -492,7 +532,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
      * manifestMap are actually defined in the actual element descriptors and reachable from
      * the manifestElement root node.
      */
-    private void sanityCheck(Map<String, DeclareStyleableInfo> manifestMap,
+    private boolean sanityCheck(Map<String, DeclareStyleableInfo> manifestMap,
             ElementDescriptor manifestElement) {
         TreeSet<String> elementsDeclared = new TreeSet<String>();
         findAllElementNames(manifestElement, elementsDeclared);
@@ -516,9 +556,9 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
         if (!stylesDeclared.isEmpty()) {
             sb.append("Warning, ADT/SDK Mismatch! The following elements are declared by the SDK but unknown to ADT: ");
             for (String name : stylesDeclared) {
-                name = guessXmlName(name);
+                sb.append(guessXmlName(name));
 
-                if (name != stylesDeclared.last()) {
+                if (!name.equals(stylesDeclared.last())) {
                     sb.append(", ");    //$NON-NLS-1$
                 }
             }
@@ -532,7 +572,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
             sb.append("Warning, ADT/SDK Mismatch! The following elements are declared by ADT but not by the SDK: ");
             for (String name : elementsDeclared) {
                 sb.append(name);
-                if (name != elementsDeclared.last()) {
+                if (!name.equals(elementsDeclared.last())) {
                     sb.append(", ");    //$NON-NLS-1$
                 }
             }
@@ -540,6 +580,8 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
             AdtPlugin.log(IStatus.WARNING, "%s", sb.toString());
             AdtPlugin.printToConsole((String)null, sb);
         }
+
+        return true;
     }
 
     /**
@@ -553,7 +595,7 @@ public final class AndroidManifestDescriptors implements IDescriptorProvider {
         if (ANDROID_MANIFEST_STYLEABLE.equals(name)) {
             sb.append(MANIFEST_NODE_NAME);
         } else {
-            name = name.replace(ANDROID_MANIFEST_STYLEABLE, "");    //$NON-NLS-1$
+            name = name.replace(ANDROID_MANIFEST_STYLEABLE, "");                //$NON-NLS-1$
             boolean first_char = true;
             for (char c : name.toCharArray()) {
                 if (c >= 'A' && c <= 'Z') {

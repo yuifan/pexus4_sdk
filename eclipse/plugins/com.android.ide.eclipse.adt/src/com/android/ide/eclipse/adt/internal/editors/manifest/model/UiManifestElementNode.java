@@ -16,15 +16,14 @@
 
 package com.android.ide.eclipse.adt.internal.editors.manifest.model;
 
+import com.android.SdkConstants;
 import com.android.ide.eclipse.adt.internal.editors.descriptors.ElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.manifest.descriptors.AndroidManifestDescriptors;
 import com.android.ide.eclipse.adt.internal.editors.manifest.descriptors.ManifestElementDescriptor;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.sdk.AndroidTargetData;
-import com.android.sdklib.SdkConstants;
 
-import org.w3c.dom.DOMException;
 import org.w3c.dom.Element;
 
 /**
@@ -56,7 +55,7 @@ public final class UiManifestElementNode extends UiElementNode {
     /**
      * Computes a short string describing the UI node suitable for tree views.
      * Uses the element's attribute "android:name" if present, or the "android:label" one
-     * followed by the element's name.
+     * followed by the element's name if not repeated.
      *
      * @return A short string describing the UI node suitable for tree views.
      */
@@ -68,11 +67,12 @@ public final class UiManifestElementNode extends UiElementNode {
             manifestDescriptors = target.getManifestDescriptors();
         }
 
+        String name = getDescriptor().getUiName();
+
         if (manifestDescriptors != null &&
                 getXmlNode() != null &&
                 getXmlNode() instanceof Element &&
                 getXmlNode().hasAttributes()) {
-
 
             // Application and Manifest nodes have a special treatment: they are unique nodes
             // so we don't bother trying to differentiate their strings and we fall back to
@@ -90,12 +90,18 @@ public final class UiManifestElementNode extends UiElementNode {
                                     AndroidManifestDescriptors.ANDROID_LABEL_ATTR);
                 }
                 if (attr != null && attr.length() > 0) {
-                    return String.format("%1$s (%2$s)", attr, getDescriptor().getUiName());
+                    // If the ui name is repeated in the attribute value, don't use it.
+                    // Typical case is to avoid ".pkg.MyActivity (Activity)".
+                    if (attr.contains(name)) {
+                        return attr;
+                    } else {
+                        return String.format("%1$s (%2$s)", attr, name);
+                    }
                 }
             }
         }
 
-        return String.format("%1$s", getDescriptor().getUiName());
+        return String.format("%1$s", name);
     }
 
     /**

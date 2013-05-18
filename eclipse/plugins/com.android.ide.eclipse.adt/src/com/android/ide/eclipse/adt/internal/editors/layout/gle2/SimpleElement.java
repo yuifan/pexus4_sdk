@@ -16,10 +16,14 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout.gle2;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IDragElement;
-import com.android.ide.eclipse.adt.editors.layout.gscripts.Rect;
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.ide.common.api.IDragElement;
+import com.android.ide.common.api.INode;
+import com.android.ide.common.api.Rect;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Represents an XML element with a name, attributes and inner elements.
@@ -39,11 +43,12 @@ public class SimpleElement implements IDragElement {
     private final String mParentFqcn;
     private final Rect mBounds;
     private final Rect mParentBounds;
-    private final ArrayList<IDragAttribute> mAttributes = new ArrayList<IDragAttribute>();
-    private final ArrayList<IDragElement> mElements = new ArrayList<IDragElement>();
+    private final List<IDragAttribute> mAttributes = new ArrayList<IDragAttribute>();
+    private final List<IDragElement> mElements = new ArrayList<IDragElement>();
 
     private IDragAttribute[] mCachedAttributes = null;
     private IDragElement[] mCachedElements = null;
+    private SelectionItem mSelectionItem;
 
     /**
      * Creates a new {@link SimpleElement} with the specified element name.
@@ -67,16 +72,18 @@ public class SimpleElement implements IDragElement {
      * Returns the element name, which must match a fully qualified class name of
      * a View to inflate.
      */
-    public String getFqcn() {
+    @Override
+    public @NonNull String getFqcn() {
         return mFqcn;
     }
 
     /**
      * Returns the bounds of the element's node, if it originated from an existing
      * canvas. The rectangle is invalid and non-null when the element originated
-     * from the object palette.
+     * from the object palette (unless it successfully rendered a preview)
      */
-    public Rect getBounds() {
+    @Override
+    public @NonNull Rect getBounds() {
         return mBounds;
     }
 
@@ -85,6 +92,7 @@ public class SimpleElement implements IDragElement {
      * from an existing canvas. Returns null if the element has no parent, such as a top
      * level element or an element originating from the object palette.
      */
+    @Override
     public String getParentFqcn() {
         return mParentFqcn;
     }
@@ -93,18 +101,21 @@ public class SimpleElement implements IDragElement {
      * Returns the bounds of the element's parent, absolute for the canvas, or null if there
      * is no suitable parent. This is null when {@link #getParentFqcn()} is null.
      */
-    public Rect getParentBounds() {
+    @Override
+    public @NonNull Rect getParentBounds() {
         return mParentBounds;
     }
 
-    public IDragAttribute[] getAttributes() {
+    @Override
+    public @NonNull IDragAttribute[] getAttributes() {
         if (mCachedAttributes == null) {
             mCachedAttributes = mAttributes.toArray(new IDragAttribute[mAttributes.size()]);
         }
         return mCachedAttributes;
     }
 
-    public IDragAttribute getAttribute(String uri, String localName) {
+    @Override
+    public IDragAttribute getAttribute(@Nullable String uri, @NonNull String localName) {
         for (IDragAttribute attr : mAttributes) {
             if (attr.getUri().equals(uri) && attr.getName().equals(localName)) {
                 return attr;
@@ -114,7 +125,8 @@ public class SimpleElement implements IDragElement {
         return null;
     }
 
-    public IDragElement[] getInnerElements() {
+    @Override
+    public @NonNull IDragElement[] getInnerElements() {
         if (mCachedElements == null) {
             mCachedElements = mElements.toArray(new IDragElement[mElements.size()]);
         }
@@ -129,6 +141,43 @@ public class SimpleElement implements IDragElement {
     public void addInnerElement(SimpleElement e) {
         mCachedElements = null;
         mElements.add(e);
+    }
+
+    @Override
+    public boolean isSame(@NonNull INode node) {
+        if (mSelectionItem != null) {
+            return node == mSelectionItem.getNode();
+        } else {
+            return node.getBounds().equals(mBounds);
+        }
+    }
+
+    void setSelectionItem(@Nullable SelectionItem selectionItem) {
+        mSelectionItem = selectionItem;
+    }
+
+    @Nullable
+    SelectionItem getSelectionItem() {
+        return mSelectionItem;
+    }
+
+    @Nullable
+    static SimpleElement findPrimary(SimpleElement[] elements, SelectionItem primary) {
+        if (elements == null || elements.length == 0) {
+            return null;
+        }
+
+        if (elements.length == 1 || primary == null) {
+            return elements[0];
+        }
+
+        for (SimpleElement element : elements) {
+            if (element.getSelectionItem() == primary) {
+                return element;
+            }
+        }
+
+        return elements[0];
     }
 
     // reader and writer methods
@@ -290,7 +339,7 @@ public class SimpleElement implements IDragElement {
                     mAttributes.size() == se.mAttributes.size() &&
                     mElements.size() == se.mElements.size() &&
                     mAttributes.equals(se.mAttributes) &&
-                    mElements.equals(mElements);
+                    mElements.equals(se.mElements);
         }
         return false;
     }

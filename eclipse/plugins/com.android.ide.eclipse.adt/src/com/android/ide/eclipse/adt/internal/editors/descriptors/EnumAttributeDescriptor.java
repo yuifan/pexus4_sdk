@@ -16,7 +16,7 @@
 
 package com.android.ide.eclipse.adt.internal.editors.descriptors;
 
-import com.android.ide.eclipse.adt.editors.layout.gscripts.IAttributeInfo;
+import com.android.ide.common.api.IAttributeInfo;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiAttributeNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiElementNode;
 import com.android.ide.eclipse.adt.internal.editors.uimodel.UiListAttributeNode;
@@ -29,7 +29,7 @@ public class EnumAttributeDescriptor extends ListAttributeDescriptor {
 
     public EnumAttributeDescriptor(String xmlLocalName, String uiName, String nsUri,
             String tooltip, IAttributeInfo attrInfo) {
-        super(xmlLocalName, uiName, nsUri, tooltip, attrInfo);
+        super(xmlLocalName, nsUri, attrInfo);
     }
 
     /**

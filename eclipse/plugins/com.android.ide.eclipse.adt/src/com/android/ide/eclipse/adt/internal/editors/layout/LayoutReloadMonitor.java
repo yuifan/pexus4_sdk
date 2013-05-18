@@ -16,31 +16,36 @@
 
 package com.android.ide.eclipse.adt.internal.editors.layout;
 
+import com.android.SdkConstants;
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.ide.common.resources.ResourceFile;
+import com.android.ide.common.resources.ResourceFolder;
+import com.android.ide.eclipse.adt.AdtConstants;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.ide.eclipse.adt.AndroidConstants;
-import com.android.ide.eclipse.adt.internal.resources.ResourceType;
 import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFile;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceFolder;
-import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
 import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor.IFileListener;
 import com.android.ide.eclipse.adt.internal.resources.manager.GlobalProjectMonitor.IResourceEventListener;
+import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager;
 import com.android.ide.eclipse.adt.internal.resources.manager.ResourceManager.IResourceListener;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState;
 import com.android.ide.eclipse.adt.internal.sdk.Sdk;
+import com.android.resources.ResourceType;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarkerDelta;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResourceDelta;
+import org.eclipse.core.runtime.CoreException;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /**
  * Monitor for file changes that could trigger a layout redraw, or a UI update
@@ -60,12 +65,12 @@ public final class LayoutReloadMonitor {
         public boolean code = false;
         /** any non-layout resource changes */
         public boolean resources = false;
-        public boolean layout = false;
         public boolean rClass = false;
         public boolean localeList = false;
+        public boolean manifest = false;
 
         boolean isAllTrue() {
-            return code && resources && rClass && localeList;
+            return code && resources && rClass && localeList && manifest;
         }
     }
 
@@ -159,16 +164,57 @@ public final class LayoutReloadMonitor {
     /**
      * Implementation of the {@link IFileListener} as an internal class so that the methods
      * do not appear in the public API of {@link LayoutReloadMonitor}.
+     *
+     * This is only to detect code and manifest change. Resource changes (located in res/)
+     * is done through {@link #mResourceListener}.
      */
     private IFileListener mFileListener = new IFileListener() {
         /*
          * Callback for IFileListener. Called when a file changed.
          * This records the changes for each project, but does not notify listeners.
          */
-        public void fileChanged(IFile file, IMarkerDelta[] markerDeltas, int kind) {
-            // get the file project
+        @Override
+        public void fileChanged(@NonNull IFile file, @NonNull IMarkerDelta[] markerDeltas,
+                int kind, @Nullable String extension, int flags, boolean isAndroidProject) {
+            // This listener only cares about .class files and AndroidManifest.xml files
+            if (!(SdkConstants.EXT_CLASS.equals(extension)
+                    || SdkConstants.EXT_XML.equals(extension)
+                        && SdkConstants.FN_ANDROID_MANIFEST_XML.equals(file.getName()))) {
+                return;
+            }
+
+            // get the file's project
             IProject project = file.getProject();
 
+            if (isAndroidProject) {
+                // project is an Android project, it's the one being affected
+                // directly by its own file change.
+                processFileChanged(file, project, extension);
+            } else {
+                // check the projects depending on it, if they are Android project, update them.
+                IProject[] referencingProjects = project.getReferencingProjects();
+
+                for (IProject p : referencingProjects) {
+                    try {
+                        boolean hasAndroidNature = p.hasNature(AdtConstants.NATURE_DEFAULT);
+                        if (hasAndroidNature) {
+                            // the changed project is a dependency on an Android project,
+                            // update the main project.
+                            processFileChanged(file, p, extension);
+                        }
+                    } catch (CoreException e) {
+                        // do nothing if the nature cannot be queried.
+                    }
+                }
+            }
+        }
+
+        /**
+         * Processes a file change for a given project which may or may not be the file's project.
+         * @param file the changed file
+         * @param project the project impacted by the file change.
+         */
+        private void processFileChanged(IFile file, IProject project, String extension) {
             // if this project has already been marked as modified, we do nothing.
             ChangeFlags changeFlags = mProjectFlags.get(project);
             if (changeFlags != null && changeFlags.isAllTrue()) {
@@ -177,7 +223,7 @@ public final class LayoutReloadMonitor {
 
             // here we only care about code change (so change for .class files).
             // Resource changes is handled by the IResourceListener.
-            if (AndroidConstants.EXT_CLASS.equals(file.getFileExtension())) {
+            if (SdkConstants.EXT_CLASS.equals(extension)) {
                 if (file.getName().matches("R[\\$\\.](.*)")) {
                     // this is a R change!
                     if (changeFlags == null) {
@@ -195,6 +241,15 @@ public final class LayoutReloadMonitor {
 
                     changeFlags.code = true;
                 }
+            } else if (SdkConstants.FN_ANDROID_MANIFEST_XML.equals(file.getName()) &&
+                    file.getParent().equals(project)) {
+                // this is a manifest change!
+                if (changeFlags == null) {
+                    changeFlags = new ChangeFlags();
+                    mProjectFlags.put(project, changeFlags);
+                }
+
+                changeFlags.manifest = true;
             }
         }
     };
@@ -210,6 +265,7 @@ public final class LayoutReloadMonitor {
          * called several times.
          *
          */
+        @Override
         public void resourceChangeEventStart() {
             // nothing to be done here, it all happens in the resourceChangeEventEnd
         }
@@ -218,6 +274,7 @@ public final class LayoutReloadMonitor {
          * Callback for ResourceMonitor.IResourceEventListener. Called at the end of a resource
          * change event. This is where we notify the listeners.
          */
+        @Override
         public void resourceChangeEventEnd() {
             // for each IProject that was changed, we notify all the listeners.
             for (Entry<IProject, ChangeFlags> entry : mProjectFlags.entrySet()) {
@@ -273,6 +330,7 @@ public final class LayoutReloadMonitor {
      */
     private IResourceListener mResourceListener = new IResourceListener() {
 
+        @Override
         public void folderChanged(IProject project, ResourceFolder folder, int eventType) {
             // if this project has already been marked as modified, we do nothing.
             ChangeFlags changeFlags = mProjectFlags.get(project);
@@ -290,6 +348,7 @@ public final class LayoutReloadMonitor {
             changeFlags.localeList = true;
         }
 
+        @Override
         public void fileChanged(IProject project, ResourceFile file, int eventType) {
             // if this project has already been marked as modified, we do nothing.
             ChangeFlags changeFlags = mProjectFlags.get(project);
@@ -299,21 +358,17 @@ public final class LayoutReloadMonitor {
 
             // now check that the file is *NOT* a layout file (those automatically trigger a layout
             // reload and we don't want to do it twice.)
-            ResourceType[] resTypes = file.getResourceTypes();
+            Collection<ResourceType> resTypes = file.getResourceTypes();
 
             // it's unclear why but there has been cases of resTypes being empty!
-            if (resTypes.length > 0) {
+            if (resTypes.size() > 0) {
                 // this is a resource change, that may require a layout redraw!
                 if (changeFlags == null) {
                     changeFlags = new ChangeFlags();
                     mProjectFlags.put(project, changeFlags);
                 }
 
-                if (resTypes[0] != ResourceType.LAYOUT) {
-                    changeFlags.resources = true;
-                } else {
-                    changeFlags.layout = true;
-                }
+                changeFlags.resources = true;
             }
         }
     };

@@ -37,6 +37,7 @@ public class LaunchMessages extends NLS {
     public static String AndroidJUnitTab_LoaderLabel;
     public static String AndroidJUnitTab_LoadInstrError_s;
     public static String AndroidJUnitTab_NoRunnerError;
+    public static String AndroidJUnitTab_SizeLabel;
     public static String AndroidJUnitTab_TestContainerText;
     public static String InstrValidator_NoTestLibMsg_s;
     public static String InstrValidator_WrongRunnerTypeMsg_s;
@@ -45,6 +46,8 @@ public class LaunchMessages extends NLS {
 
     public static String RemoteAdtTestRunner_RunIOException_s;
     public static String RemoteAdtTestRunner_RunTimeoutException;
+    public static String RemoteAdtTestRunner_RunAdbCommandRejectedException_s;
+    public static String RemoteAdtTestRunner_RunShellCommandUnresponsiveException;
     public static String RemoteAdtTestRunner_RunStoppedMsg;
 
     static {

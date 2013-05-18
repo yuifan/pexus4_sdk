@@ -16,17 +16,20 @@
 
 package com.android.ide.eclipse.adt.internal.sdk;
 
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.ide.eclipse.adt.AdtPlugin;
-import com.android.sdklib.ISdkLog;
+import com.android.utils.ILogger;
 
 /**
- * An {@link ISdkLog} logger that outputs to the ADT console.
+ * An {@link ILogger} logger that outputs to the ADT console.
  */
-public class AdtConsoleSdkLog implements ISdkLog {
+public class AdtConsoleSdkLog implements ILogger {
 
     private static final String TAG = "SDK Manager"; //$NON-NLS-1$
 
-    public void error(Throwable t, String errorFormat, Object... args) {
+    @Override
+    public void error(@Nullable Throwable t, @Nullable String errorFormat, Object... args) {
         if (t != null) {
             AdtPlugin.logAndPrintError(t, TAG, "Error: " + errorFormat, args);
         } else {
@@ -34,7 +37,8 @@ public class AdtConsoleSdkLog implements ISdkLog {
         }
     }
 
-    public void printf(String msgFormat, Object... args) {
+    @Override
+    public void info(@NonNull String msgFormat, Object... args) {
         String msg = String.format(msgFormat, args);
         for (String s : msg.split("\n")) {
             if (s.trim().length() > 0) {
@@ -43,7 +47,13 @@ public class AdtConsoleSdkLog implements ISdkLog {
         }
     }
 
-    public void warning(String warningFormat, Object... args) {
+    @Override
+    public void verbose(@NonNull String msgFormat, Object... args) {
+        info(msgFormat, args);
+    }
+
+    @Override
+    public void warning(@NonNull String warningFormat, Object... args) {
         AdtPlugin.printToConsole(TAG, String.format("Warning: " + warningFormat, args));
     }
 }

@@ -20,8 +20,8 @@ import com.android.ide.eclipse.adt.AdtPlugin;
 import com.android.ide.eclipse.adt.internal.project.ProjectChooserHelper;
 import com.android.ide.eclipse.adt.internal.project.ProjectChooserHelper.IProjectChooserFilter;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState;
-import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.ide.eclipse.adt.internal.sdk.ProjectState.LibraryState;
+import com.android.ide.eclipse.adt.internal.sdk.Sdk;
 import com.android.sdklib.internal.project.ProjectProperties;
 import com.android.sdklib.internal.project.ProjectPropertiesWorkingCopy;
 
@@ -92,6 +92,7 @@ final class LibraryProperties {
      * that are already dependencies.
      */
     IProjectChooserFilter mFilter = new IProjectChooserFilter() {
+        @Override
         public boolean accept(IProject project) {
             // first check if it's a library
             ProjectState state = Sdk.getProjectState(project);
@@ -113,6 +114,7 @@ final class LibraryProperties {
             return false;
         }
 
+        @Override
         public boolean useCache() {
             return false;
         }
@@ -129,6 +131,7 @@ final class LibraryProperties {
         mTop.setLayoutData(new GridData(GridData.FILL_BOTH));
         mTop.setFont(parent.getFont());
         mTop.addDisposeListener(new DisposeListener() {
+            @Override
             public void widgetDisposed(DisposeEvent e) {
                 mMatchIcon.dispose();
                 mErrorIcon.dispose();
@@ -167,8 +170,8 @@ final class LibraryProperties {
                         "Please select a library project");
                 if (javaProject != null) {
                     IProject iProject = javaProject.getProject();
-                    IPath relativePath = Sdk.makeRelativeTo(
-                            iProject.getLocation(), mState.getProject().getLocation());
+                    IPath relativePath = iProject.getLocation().makeRelativeTo(
+                            mState.getProject().getLocation());
 
                     addItem(relativePath.toString(), iProject, -1);
                     resetEnabled();
@@ -267,11 +270,11 @@ final class LibraryProperties {
 
     /**
      * Saves the state of the UI into the {@link ProjectProperties} object that was returned by
-     * {@link #setContent(ProjectState)}.
+     * {@link #setContent}.
      * <p/>This does not update the {@link ProjectState} object that was provided, nor does it save
      * the new properties on disk. Saving the properties on disk, via
-     * {@link ProjectProperties#save()}, and updating the {@link ProjectState} instance, via
-     * {@link ProjectState#reloadProperties()} must be done by the caller.
+     * {@link ProjectPropertiesWorkingCopy#save()}, and updating the {@link ProjectState} instance,
+     * via {@link ProjectState#reloadProperties()} must be done by the caller.
      * @return <code>true</code> if there was actually new data saved in the project state, false
      * otherwise.
      */
@@ -344,7 +347,7 @@ final class LibraryProperties {
         }
         item.setData(data);
         item.setText(0, data.relativePath);
-        item.setImage( data.project != null ? mMatchIcon : mErrorIcon);
+        item.setImage(data.project != null ? mMatchIcon : mErrorIcon);
         item.setText(1, data.project != null ? data.project.getName() : "?");
     }
 
